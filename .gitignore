@@ -1,0 +1,10 @@
+# Tenant data lives in ~/.caddie (README, "Tenant folder"); these stay out even if a run writes here.
+logs/
+meetings/
+contexts/
+docs/
+*.toml
+!config.example.toml
+# session handoffs: local to each machine
+.claude/
+__pycache__/

@@ -1,0 +1,46 @@
+#!/bin/bash
+# Actions for the Caddie menu bar item (menubar/caddie.5s.sh, a SwiftBar plugin): start [project] | start-with | stop |
+# board | wrapup | review | update | improve. Caddie runs in the background; the board is its window, logs/menubar.out its console.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/Applications/cmux.app/Contents/Resources/bin:$PATH"  # SwiftBar's PATH is bare
+C="$(cd "$(dirname "$0")/.." && pwd)"
+eval "$(python3 "$C/caddie.py" --shell-config)"  # CADDIE_HOME, DEFAULT_PROJECT, PARTICIPANTS, PROFILE, ROOTS
+OUT="$CADDIE_HOME/logs/menubar.out"; PID="$CADDIE_HOME/logs/menubar.pid"; NAMES="$CADDIE_HOME/logs/menubar.participants"
+
+names() { cat "$NAMES" 2>/dev/null || echo "$PARTICIPANTS"; }  # the last names used; the config's at first
+running() { [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; }
+board_url() { grep -m1 -o 'http://127.0.0.1:[0-9]*/' "$OUT" 2>/dev/null; }
+open_board() { local u; u=$(board_url) && open -na "Google Chrome" --args --profile-directory="$PROFILE" --app="$u"; }
+
+case "$1" in
+  start-with)  # who is on the call, prefilled with last time's answer
+    last=$(names | tr -d '"\\')
+    names=$(osascript -e "text returned of (display dialog \"Who is on the call?\" default answer \"$last\" with title \"Caddie\")") || exit 0
+    printf '%s' "$names" > "$NAMES"
+    exec "$0" start ;;
+  start)  # $2: the project folder; none = caddie.py's default
+    if running; then open_board; exit 0; fi
+    mkdir -p "$CADDIE_HOME/logs"
+    args=(); [ -n "$2" ] && args+=("$2"); n=$(names); [ -n "$n" ] && args+=(--with "$n")
+    set -m  # own process group, so the job outlives this script and Stop's SIGINT reaches it
+    nohup "$C/caddie.py" "${args[@]}" < /dev/null > "$OUT" 2>&1 &
+    echo $! > "$PID"
+    for _ in $(seq 40); do board_url > /dev/null && break; sleep 0.25; done
+    open_board ;;
+  stop) running && kill -INT "$(cat "$PID")" ;;  # Ctrl-C: no wrap-up; a call that ends in Muesli wraps up by itself
+  board) open_board ;;
+  wrapup)
+    f=$(ls -t "$CADDIE_HOME"/meetings/*/*.md 2>/dev/null | grep -v -- '-packet-' | head -1)
+    [ -n "$f" ] && open -e "$f" ;;
+  review) cmux new-workspace --cwd "$C" --command "claude /caddie-review" --description "Caddie review" ;;
+  improve)  # a Claude session in the checkout: file an issue or make a change (CLAUDE.md there says how)
+    if command -v cmux > /dev/null; then cmux new-workspace --cwd "$C" --command "claude" --description "Improve Caddie"
+    else open -a Terminal "$C"; fi ;;
+  update)  # to the newest release tag: never during a call, never over local changes or unreleased local commits
+    running && exit 0
+    cd "$C" && git fetch -q --tags origin 2> /dev/null || exit 0
+    latest=$(git tag -l 'v*' --sort=-v:refname | head -1)
+    [ -n "$latest" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] || exit 0
+    git merge-base --is-ancestor HEAD "$latest" || exit 0   # HEAD is the release already, or holds work not in it
+    if git symbolic-ref -q HEAD > /dev/null; then git merge -q --ff-only "$latest"   # on a branch: move it forward
+    else git checkout -q --detach "$latest"; fi ;;
+esac

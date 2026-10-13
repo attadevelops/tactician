@@ -1,0 +1,23 @@
+#!/bin/bash
+# Never push a tenant's data. Installed with: git config core.hooksPath hooks
+# Blocks a push when a pushed commit descends from a private history (root SHAs in $CADDIE_HOME/blocked-roots), or when
+# the pushed tree or the new commit messages contain a term from $CADDIE_HOME/denylist (one per line, whole words, any case).
+T="${CADDIE_HOME:-$HOME/.caddie}"
+zero=0000000000000000000000000000000000000000
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  for r in $(cat "$T/blocked-roots" 2>/dev/null); do
+    if git merge-base --is-ancestor "$r" "$lsha" 2>/dev/null; then
+      echo "pre-push: $lref contains the private history rooted at $r; refusing" >&2; exit 1
+    fi
+  done
+  [ -s "$T/denylist" ] || continue
+  if hits=$(git grep -I -i -w -l -E -f "$T/denylist" "$lsha" -- .) && [ -n "$hits" ]; then
+    echo "pre-push: tenant terms in these files of $lref; refusing:" >&2; echo "$hits" >&2; exit 1
+  fi
+  range=$([ "$rsha" = "$zero" ] && echo "$lsha" || echo "$rsha..$lsha")
+  if git log --format=%B "$range" | grep -q -i -w -E -f "$T/denylist"; then
+    echo "pre-push: tenant terms in the commit messages of $lref; refusing" >&2; exit 1
+  fi
+done
+exit 0

@@ -1,0 +1,22 @@
+# Caddie tenant config: copy to ~/.caddie/config.toml (or $CADDIE_HOME/config.toml) and edit.
+# One tenant folder per machine; nothing in it is ever committed to the caddie repo.
+
+# Your name as the prompt and the judge use it ("You" in the transcript is this person).
+user = "Alex"
+
+# Folders that hold the projects you take calls about. A project is found by name under these, the menu bar lists
+# their sub-folders (except names starting with "_"), and projects under one root share one stream of wrap-ups.
+project_roots = ["~/work/acme"]
+
+# The project a bare `caddie` (and the menu bar's Start <project> Call) uses.
+default_project = "acme-web"
+
+# Who is usually on the call, with roles; the menu bar passes it to every start until you edit the names.
+# Roles drive the wording: plain for non-technical listeners, technical for developers.
+participants = "Sam (project manager, not technical, runs the call), Pat (client, executive)"
+
+# Chrome profile directory the board opens in ("Default", "Profile 1", ...).
+browser_profile = "Default"
+
+# The macOS shortcut that runs Muesli's "Start Meeting Recording" action with its Title set to the Shortcut Input.
+shortcut = "Caddie Start Meeting"

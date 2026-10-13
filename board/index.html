@@ -1,0 +1,833 @@
+<!doctype html>
+<!--
+  The live board: the page caddie.py serves at GET / (this file is board/index.html). It listens to the
+  server-sent events that same server streams at GET /events and draws the Say and Agenda panes from them.
+  To try it without Claude, run prototype/replay_events.py and open http://127.0.0.1:8791/
+  Keys: R clears the board in this browser only (the server keeps its own state); / opens the ask field, and so does a
+  click on any item (asked about that item; Enter with nothing typed asks for more detail; Done and Wrong are the user's
+  verdicts on it). Esc closes it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Caddie</title>
+<style>
+  :root {
+    --field: #0b1215;
+    --field-2: #0f181d;
+    --red: #ff5a52;
+    --red-wash: rgba(255, 90, 82, .11);
+    --amber: #ffb21f;
+    --white: #eef2f4;
+    --dim: #b6c0c8;
+    --muted: #8794a0;
+    --spent: #5a6672;
+    --done: #62d394;
+    /* One layout unit: 1px at 1920x1080, grows on bigger monitors, never below 1px (so the stated
+       minimum sizes hold). All sizes below are written as multiples of it. */
+    --u: max(1px, min(calc(100vw / 1920), calc(100vh / 1080)));
+    --face: "Avenir Next Condensed", "Avenir Next", "DIN Condensed", "Helvetica Neue", "Arial Narrow", Arial, sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--field);
+    color: var(--white);
+    font-family: var(--face);
+    font-weight: 600;
+    font-synthesis: none;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  p, h2, ol { margin: 0; }
+
+  .board {
+    height: 100%;
+    display: grid;
+    grid-template-columns: 35fr 65fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "agenda say" "foot foot";
+  }
+
+  h2 {
+    font-size: calc(26 * var(--u));
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: .01em;
+  }
+
+  /* ------------------------------------------------------------------ agenda */
+  .agenda {
+    grid-area: agenda;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--field-2);
+    padding: 0 calc(36 * var(--u)) 0 calc(48 * var(--u));
+  }
+  .agenda.clip {
+    -webkit-mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
+    mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
+  }
+  .agenda h2, .top { min-height: calc(88 * var(--u)); display: flex; align-items: center; padding-top: calc(10 * var(--u)); }
+
+  /* The spine: the one structural line, because rank order is a real sequence. */
+  #agenda, #raised {
+    list-style: none;
+    margin: calc(8 * var(--u)) 0 0 calc(8 * var(--u));
+    padding: 0 0 0 calc(34 * var(--u));
+    border-left: 2px solid rgba(238, 242, 244, .16);
+  }
+  #agenda:empty { margin-left: 0; padding-left: 0; border-left: 0; }
+  #agenda:empty::before { content: "Waiting for the agenda."; font-size: calc(28 * var(--u)); font-weight: 500; color: var(--spent); }
+  .agenda:has(#raised li) #agenda:empty::before { content: "All raised."; }
+  .ag {
+    --fs: calc(28 * var(--u));
+    --pip: var(--muted);
+    position: relative;
+    margin: 0 0 calc(26 * var(--u));
+    font-size: var(--fs);
+    font-weight: 600;
+    line-height: 1.12;
+    color: var(--dim);
+    transition: color .35s;
+  }
+  .ag.lead { --fs: calc(40 * var(--u)); --pip: var(--white); font-weight: 800; color: var(--white); }
+  .ag .ln { text-wrap: balance; }
+  .ag::before {
+    content: "";
+    position: absolute;
+    left: calc(-34 * var(--u) - 9px);
+    top: calc(.56em - 8px);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 3px solid var(--pip);
+    background: var(--field-2);
+  }
+  .ag.lead::before { background: var(--pip); }
+  /* Raised: struck through, in their own list under the open items (and under the commitments), newest first, so
+     the end of the call shows what never came up; when the pane runs out of room they are the first to go. */
+  .ag .ln { text-decoration: line-through transparent; text-decoration-thickness: max(2px, calc(2.5 * var(--u))); transition: text-decoration-color .6s; }
+  .ag.struck { --fs: calc(24 * var(--u)); --pip: var(--spent); font-weight: 500; color: var(--spent); }
+  .ag.struck .ln { text-decoration-color: var(--spent); }
+  #raised { margin-top: calc(40 * var(--u)); }
+  #raised:empty { display: none; }
+
+  /* Commitments the user made on the call, oldest first, for the read-back before it ends. */
+  #cbox { margin-top: calc(34 * var(--u)); }
+  #cbox:not(:has(li)) { display: none; }
+  .agenda #cbox h2 { min-height: 0; padding: 0 0 calc(12 * var(--u)); }
+  #commits { list-style: none; margin: 0; padding: 0; }
+  .cm {
+    position: relative;
+    margin: 0 0 calc(14 * var(--u));
+    padding-left: calc(42 * var(--u));
+    font-size: calc(26 * var(--u));
+    font-weight: 600;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+  .cm::before {
+    content: "";
+    position: absolute;
+    left: calc(8 * var(--u) - 5px);
+    top: calc(.58em - 6px);
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--done);
+  }
+  .ag.enter, .cm.enter { animation: slide-in .5s cubic-bezier(.2, .8, .2, 1) var(--d, 0s) backwards; }
+
+  /* -------------------------------------------------------------------- say */
+  .say {
+    grid-area: say;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 calc(48 * var(--u)) 0 calc(40 * var(--u));
+  }
+  .top { justify-content: space-between; }
+  #clock {
+    font-size: calc(34 * var(--u));
+    font-weight: 700;
+    letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--white);
+  }
+
+  #stack { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  #stack:empty::before { content: "Nothing to say right now."; padding-top: calc(6 * var(--u)); font-size: calc(32 * var(--u)); font-weight: 500; color: var(--spent); }
+  #stack.clip {
+    -webkit-mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
+    mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
+  }
+  #stack.still, #stack.still * { transition: none !important; }   /* a joined board is correct on its first frame */
+  /* No signal: what is on screen may be out of date, so it dims. */
+  #stack, #agenda { transition: opacity 1s; }
+  .board.stale #stack, .board.stale #agenda { opacity: .4; }
+
+  /* Severity ladder: warning / caution / advisory. Colour, size, bar weight and wash all encode it. */
+  .it {
+    --c: var(--white);
+    --cue: #fff;
+    --wash: transparent;
+    --bar: calc(4 * var(--u));
+    --fs: calc(32 * var(--u));
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    margin: 0 0 calc(16 * var(--u));
+    padding: calc(14 * var(--u)) calc(26 * var(--u)) calc(14 * var(--u)) calc(24 * var(--u));
+    color: var(--c);
+    background-color: var(--wash);
+    border-left: var(--bar) solid var(--c);
+  }
+  .it.i2 { --c: var(--amber); --cue: #ffe3a6; --bar: calc(8 * var(--u)); --fs: calc(40 * var(--u)); }
+  .it.i3 { --c: var(--red); --cue: #ffd5d1; --wash: var(--red-wash); --bar: calc(14 * var(--u)); --fs: calc(56 * var(--u)); font-weight: 700; }
+
+  .it .ln {
+    font-size: var(--fs);
+    line-height: 1.1;
+    text-wrap: balance;
+    transition: font-size .5s cubic-bezier(.3, .7, .2, 1);
+  }
+  .it .ln + .ln { margin-top: .1em; }
+  .it.i3 .hd { font-size: calc(var(--fs) * 1.14); font-weight: 800; }
+  .it .src { margin-top: .55em; font-size: calc(18 * var(--u)); font-weight: 500; line-height: 1.2; color: var(--muted); }
+
+  /* Words to say aloud sit in quotes and get a pale tint of the item's own hue. */
+  .cue { color: var(--cue); }
+  /* Inverse-video keyword for corrections. */
+  .tag {
+    display: inline-block;
+    margin-right: .3em;
+    padding: .06em .24em .1em;
+    vertical-align: .06em;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--field);
+    background: var(--c);
+    border-radius: .1em;
+  }
+
+  /* Done: a check, one short line, everything else folds away. Compact: the same fold, no check, used
+     when the stack runs out of room (oldest amber/white items first, an older red only as a last resort). */
+  .more { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .55s cubic-bezier(.3, .7, .2, 1), opacity .4s; }
+  .more-in { min-height: 0; overflow: hidden; }
+  .it.done, .it.compact {
+    --fs: calc(28 * var(--u));
+    --wash: transparent;
+    padding-top: calc(8 * var(--u));
+    padding-bottom: calc(8 * var(--u));
+  }
+  .it.done .more, .it.compact .more { grid-template-rows: 0fr; opacity: 0; }
+  .it.i3.done .hd, .it.i3.compact .hd { font-size: var(--fs); }
+  .ck {
+    flex: none;
+    width: 0;
+    height: calc(var(--fs) * 1.02);
+    margin-right: 0;
+    opacity: 0;
+    fill: none;
+    stroke: var(--done);
+    stroke-width: 3.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    overflow: visible;
+    transition: width .45s, margin-right .45s, opacity .45s;
+  }
+  .ck path { stroke-dasharray: 26; stroke-dashoffset: 26; }
+  .it.done .ck { width: calc(var(--fs) * 1.02); margin-right: calc(14 * var(--u)); opacity: 1; }
+  .it.done .ck path { stroke-dashoffset: 0; transition: stroke-dashoffset .5s .15s ease-out; }
+
+  /* Retired: fade to grey over 2 s (the script then lets the item leave). */
+  .it.retiring { transition: color 2s linear, border-color 2s linear, background-color 2s linear; }
+  .it.retiring { --c: var(--spent); --cue: var(--spent); --wash: transparent; }
+  .it.retiring .cue { transition: color 2s linear; }
+  .it.retiring .tag { transition: background-color 2s linear; }
+  .it.leaving, .ag.leaving, .cm.leaving {
+    height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
+    overflow: hidden;
+    opacity: 0;
+    transition: height .45s ease, padding .45s ease, margin .45s ease, opacity .35s ease;
+  }
+
+  /* Arrival: every item drops in from above; only red also flashes (double flash plus an edge flash). */
+  .it.enter { animation: drop .45s cubic-bezier(.2, .8, .2, 1) calc(var(--d, 0s) + .26s) backwards; }   /* waits while the stack makes room */
+  .it.i3.enter { animation: drop .45s cubic-bezier(.2, .8, .2, 1) calc(var(--d, 0s) + .26s) backwards, flash 1.6s ease-out calc(var(--d, 0s) + .46s); }
+  @keyframes drop { from { opacity: 0; transform: translateY(calc(-26 * var(--u))); } }
+  @keyframes slide-in { from { opacity: 0; transform: translateX(calc(-18 * var(--u))); } }
+  @keyframes flash {
+    0%, 100% { background-color: var(--red-wash); }
+    20%, 60% { background-color: rgba(255, 90, 82, .38); }
+    40% { background-color: rgba(255, 90, 82, .12); }
+  }
+  #alarm { position: fixed; inset: 0; z-index: 9; pointer-events: none; }
+  #alarm.on { animation: alarm 1.4s ease-out; }
+  @keyframes alarm {
+    0%   { box-shadow: inset 0 0 0 calc(22 * var(--u)) rgba(255, 90, 82, 0); }
+    10%  { box-shadow: inset 0 0 0 calc(22 * var(--u)) rgba(255, 90, 82, .85); }
+    35%  { box-shadow: inset 0 0 0 calc(22 * var(--u)) rgba(255, 90, 82, .12); }
+    50%  { box-shadow: inset 0 0 0 calc(22 * var(--u)) rgba(255, 90, 82, .7); }
+    100% { box-shadow: inset 0 0 0 calc(22 * var(--u)) rgba(255, 90, 82, 0); }
+  }
+
+  /* Every item is a question waiting to be asked: a click picks it for the ask field. */
+  .it, .ag, .cm { cursor: pointer; }
+  .it.picked, .ag.picked, .cm.picked { outline: calc(2 * var(--u)) solid rgba(238, 242, 244, .55); outline-offset: calc(6 * var(--u)); }
+
+  /* ------------------------------------------------------------------ footer */
+  .foot {
+    grid-area: foot;
+    display: flex;
+    align-items: center;
+    gap: calc(36 * var(--u));
+    padding: calc(11 * var(--u)) calc(48 * var(--u));
+    background: #070c0f;
+    color: var(--muted);
+    font-size: calc(18 * var(--u));
+    font-weight: 500;
+    line-height: 1.2;
+  }
+  .lw { flex: 1; min-width: 0; overflow: hidden; }
+  #line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #line:empty::before { content: "No transcript yet."; color: var(--spent); }
+  #line.roll { animation: roll .22s ease-out; }
+  @keyframes roll { from { opacity: 0; transform: translateY(70%); } }
+  #line .who { margin-right: .6em; font-weight: 700; }
+  #line.me .who { color: var(--white); }
+  .state { flex: none; display: flex; align-items: center; gap: .55em; color: var(--white); }
+  .dot { width: .7em; height: .7em; border-radius: 50%; background: var(--done); animation: pulse 1.8s ease-in-out infinite; }
+  .state.off { color: var(--red); }
+  .state.off .dot { background: var(--red); animation: none; }
+  @keyframes pulse { 50% { opacity: .35; transform: scale(.7); } }
+  .last, .lag { flex: none; font-variant-numeric: tabular-nums; }
+  .state.ask { color: var(--amber); }
+  .foot #end.armed { color: var(--red); border-color: var(--red); }
+
+  /* Muesli not transcribing: a banner the user cannot miss, above the Say stack */
+  #rec { display: flex; align-items: center; gap: calc(24 * var(--u)); margin: 0 0 calc(18 * var(--u)); padding: calc(18 * var(--u)) calc(24 * var(--u));
+    font-size: calc(30 * var(--u)); line-height: 1.25; color: var(--red); background: var(--red-wash);
+    border: calc(3 * var(--u)) solid var(--red); border-radius: calc(10 * var(--u)); }
+  #rec[hidden], #recbtn[hidden] { display: none; }
+  #rec.soft { color: var(--amber); border-color: var(--amber); background: rgba(255, 178, 31, .1); }
+  #rec b { font-weight: 700; }
+  #recbtn { margin-left: auto; flex: none; padding: .15em .8em; font: inherit; font-size: .8em; color: inherit; background: transparent;
+    border: calc(2 * var(--u)) solid currentColor; border-radius: .3em; cursor: pointer; }
+  .state.ask .dot { background: var(--amber); }
+  #ask { display: flex; align-items: center; gap: .7em; }
+  #ask[hidden], .foot.asking #line, #ask [hidden], .lag:empty { display: none; }
+  #about { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--white); }
+  #q { flex: 1; min-width: 0; padding: .1em 0; font: inherit; color: var(--white); background: transparent; border: 0; border-bottom: 1px solid var(--muted); outline: 0; }
+  .foot button { flex: none; padding: .1em .7em; font: inherit; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .3); border-radius: .3em; cursor: pointer; }
+
+  @media (max-width: 900px) {
+    .board { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; grid-template-areas: "say" "agenda" "foot"; }
+    .agenda { max-height: 36vh; padding: 0 20px; }
+    .agenda h2 { min-height: 0; padding: 14px 0 6px; }
+    .say { padding: 0 20px; }
+    .top { min-height: 0; flex-wrap: wrap; row-gap: 4px; padding: 14px 0 8px; }
+    .foot { padding: 10px 20px; gap: 16px; }
+    .last { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div id="alarm" aria-hidden="true"></div>
+
+<div class="board">
+  <aside class="agenda" aria-label="Agenda">
+    <h2>Agenda</h2>
+    <ol id="agenda"></ol>
+    <section id="cbox" aria-label="Your commitments"><h2>You committed</h2><ol id="commits"></ol></section>
+    <ol id="raised" aria-label="Raised"></ol>
+  </aside>
+
+  <main class="say">
+    <header class="top">
+      <h2>Say</h2>
+      <span id="clock" role="timer" aria-label="Clock">00:00:00</span>
+    </header>
+    <div id="rec" role="alert" hidden><b id="rechead"></b><span id="rectext"></span><button type="button" id="recbtn" hidden>Start recording</button></div>
+    <div id="stack" role="log" aria-live="polite" aria-relevant="additions" aria-label="Things to say"></div>
+  </main>
+
+  <footer class="foot">
+    <div class="lw"><div id="line"></div>
+      <form id="ask" hidden autocomplete="off"><span id="about"></span><input id="q" aria-label="Ask Caddie"><button type="button" id="more">More detail</button><button type="button" id="done">Done</button><button type="button" id="wrong">Wrong</button></form>
+    </div>
+    <button type="button" id="askbtn" title="Ask Caddie (/)">Ask</button>
+    <span class="state" id="state" role="status"><span class="dot"></span><span id="status">listening</span></span>
+    <span class="lag" id="lag" title="Speech to board: how long after the newest line Caddie had heard the last item arrived"></span>
+    <span class="last">last event <time id="last">--:--:--</time></span>
+    <button type="button" id="end" title="End Caddie: during a call it writes the wrap-up first">✕ End</button>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const board = $('.board'), pane = $('.agenda'), stack = $('#stack'), alist = $('#agenda'), rlist = $('#raised'), clist = $('#commits');
+  const clock = $('#clock'), lineEl = $('#line'), statusEl = $('#status'), stateEl = $('#state'), lastEl = $('#last');
+  const foot = $('.foot'), form = $('#ask'), qEl = $('#q'), aboutEl = $('#about'), moreBtn = $('#more'), lagEl = $('#lag');
+  const verdictBtns = [$('#done'), $('#wrong')];
+  const TOKEN = '__CADDIE_TOKEN__';   // caddie.py writes the run's token here; POST /ask refuses a request without it
+
+  const FOLD_MS = 3000;       // a done say item keeps its check and one-line fold this long, then fades
+  const SILENCE_MS = 60000;   // no event for this long: no signal
+  const BATCH_MS = 30;        // events that arrive together are applied together
+  const ASK_MS = 90000;       // "asking" shows until the next say item arrives, or this long
+
+  // item id -> { id, store, phase, el, text, ... }; say: live|done|retiring, agenda: live|struck, commits: live; any: gone (marked wrong)
+  const say = new Map(), agenda = new Map(), commits = new Map();
+  let epoch = 0, queue = [], batchTimer = 0, agSig = '', fitAt = 0, tieBreak = 0;
+  let rec = 'recording';   // Muesli's state as the server last said; a server that never says (the prototype) shows no banner
+  let linkUp = true, lastAt = Date.now(), lastEventAt = 0, U = 1, picked = null, askingAt = 0, askFailAt = 0, heard = NaN;
+
+  const two = (n) => String(n).padStart(2, '0');
+  const hms = (d) => two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const later = (fn, ms) => { const ep = epoch; setTimeout(() => { if (ep === epoch) fn(); }, ms); };
+  const imp = (n) => Math.max(1, Math.min(3, Math.round(+n) || 1));
+  const daySecs = (t) => { const m = /^(\d\d):(\d\d):(\d\d)$/.exec(t || ''); return m ? m[1] * 3600 + m[2] * 60 + +m[3] : NaN; };
+  const sizeU = () => { U = Math.max(1, Math.min(innerWidth / 1920, innerHeight / 1080)); };
+
+  // ---------------------------------------------------------------- text
+  // The model writes straight quotes and apostrophes; set them as typographic ones.
+  const typo = (s) => String(s)
+    .replace(/"([^"]*)"/g, '“$1”')
+    .replace(/(^|[\s(“])'/g, '$1‘')
+    .replace(/'/g, '’');
+
+  // WRONG:/CAREFUL: becomes an inverse-video tag. A quoted span that runs to the end of the line is the words to
+  // say aloud (pale tint of the item's colour); a quoted term inside a sentence is only a mention and stays plain.
+  function markup(raw, first) {
+    let tag = '', line = String(raw);
+    const m = first && line.match(/^(WRONG|CAREFUL):\s*/);
+    if (m) { tag = '<b class="tag">' + m[1] + '</b>'; line = line.slice(m[0].length); }
+    line = esc(typo(line));
+    const i = line.lastIndexOf('“'), j = line.indexOf('”', i);
+    if (i >= 0 && j > i && /^[\s.,;:!?)]*$/.test(line.slice(j + 1))) {
+      line = line.slice(0, i) + '<span class="cue">' + line.slice(i, j + 1) + '</span>' + line.slice(j + 1);
+    }
+    return tag + line;
+  }
+
+  function buildSay(e) {
+    const el = document.createElement('article');
+    el.className = 'it i' + imp(e.importance);
+    el.dataset.id = e.id;
+    el.tabIndex = 0;
+    const lines = (Array.isArray(e.lines) ? e.lines : []).map(String).filter(Boolean).slice(0, 3);
+    el.innerHTML =
+      '<svg class="ck" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5l5.5 5.5L20.5 6.5"/></svg>' +
+      '<div class="tx"><p class="ln hd">' + markup(lines[0] || '', true) + '</p>' +
+      '<div class="more"><div class="more-in">' +
+      lines.slice(1).map((l) => '<p class="ln">' + markup(l, false) + '</p>').join('') +
+      (e.source ? '<p class="src">' + esc(e.source) + '</p>' : '') +
+      '</div></div></div>';
+    return el;
+  }
+
+  function buildAgenda(e) {
+    const el = document.createElement('li');
+    el.className = 'ag';
+    el.dataset.id = e.id;
+    el.tabIndex = 0;
+    el.innerHTML = '<p class="ln">' + esc(typo(e.text || '')) + '</p>';
+    return el;
+  }
+
+  function buildCommit(e) {
+    const el = document.createElement('li');
+    el.className = 'cm';
+    el.dataset.id = e.id;
+    el.tabIndex = 0;
+    el.textContent = typo(e.text || '');
+    return el;
+  }
+
+  // ---------------------------------------------------------------- the event stream
+  const es = new EventSource("/events");
+
+  es.onopen = () => {
+    // A (re)connection starts with a snapshot of every open item: rebuild from it, so nothing stale survives.
+    clearTimeout(batchTimer); batchTimer = 0; queue = [];
+    clearBoard();
+    linkUp = true; lastAt = Date.now();
+  };
+  es.onerror = () => { linkUp = false; };          // EventSource retries by itself
+  es.addEventListener('ping', () => { linkUp = true; lastAt = Date.now(); });   // the server's heartbeat in a quiet stretch
+  es.onmessage = (m) => {
+    let e;
+    try { e = JSON.parse(m.data); } catch (_) { return; }
+    if (!e || typeof e !== 'object') return;
+    linkUp = true;
+    lastAt = lastEventAt = Date.now();
+    queue.push(e);
+    if (!batchTimer) batchTimer = setTimeout(flush, BATCH_MS);
+  };
+
+  // Events that arrive together are applied together. A say item added and retired inside one batch (a server
+  // replaying its history after the snapshot) never reaches the screen; a repeated add (snapshot, then history)
+  // is ignored; events with seq 0 are the snapshot and appear without entrance motion.
+  function flush() {
+    batchTimer = 0;
+    const evs = queue; queue = [];
+    const paneOf = (e) => e.pane || (String(e.id).startsWith('a') ? 'agenda' : 'say');
+    const ends = new Set(evs.filter((e) => ['done', 'expire', 'wrong'].includes(e.kind)).map((e) => paneOf(e) + ':' + e.id));
+    const fresh = [];
+    let line = null, relayout = false, agInstant = true, newAgenda = 0;
+
+    for (const e of evs) {
+      if (e.kind === 'rec') { setRec(e); continue; }
+      const id = String(e.id), pane = paneOf(e), dies = ends.has(pane + ':' + id), silent = e.seq === 0;
+      if (e.kind === 'transcript') {
+        line = e;
+        heard = daySecs(e.t);
+      } else if (e.kind === 'add' && pane === 'say') {
+        const old = say.get(id);
+        if ((old && old.phase !== 'retiring') || dies) continue;
+        const s = { id, store: say, phase: 'live', el: buildSay(e), text: (Array.isArray(e.lines) ? e.lines : []).join(' ') };
+        say.set(id, s);
+        fresh.push({ s, silent, red: imp(e.importance) === 3 });
+      } else if (e.kind === 'agenda') {
+        let s = agenda.get(id);
+        if (!s) {
+          s = { id, store: agenda, phase: 'live', el: buildAgenda(e), text: e.text };
+          agenda.set(id, s);                                       // layoutAgenda puts it in the list, so it does not glide
+          if (!silent && !calm) { s.el.classList.add('enter'); s.el.style.setProperty('--d', (newAgenda++ * 90) + 'ms'); }
+        } else if (s.text !== e.text) {
+          s.text = e.text;
+          s.el.firstChild.innerHTML = esc(typo(e.text || ''));
+        }
+        if (e.done) strike(s, e.done);                             // the snapshot carries what was already raised
+        else if (s.phase === 'struck') { s.phase = 'live'; s.el.classList.remove('struck'); }   // re-ranked: back in play
+        s.rank = +e.rank || 99;
+        s.tie = ++tieBreak;
+        relayout = true;
+        if (!silent) agInstant = false;
+      } else if (e.kind === 'commit') {
+        let s = commits.get(id);
+        if (s && s.phase === 'gone') s = null;
+        if (!s) {
+          s = { id, store: commits, phase: 'live', el: buildCommit(e), text: e.text };
+          commits.set(id, s);
+          if (!silent && !calm) s.el.classList.add('enter');
+          clist.append(s.el);
+        } else {
+          s.text = e.text;
+          s.el.textContent = typo(e.text || '');
+        }
+      } else if (e.kind === 'done' || e.kind === 'expire' || e.kind === 'wrong') {
+        const s = ({ say, agenda, commit: commits })[pane]?.get(id);
+        if (!s) continue;
+        if (pane === 'agenda') { relayout = true; agInstant = false; }
+        if (e.kind === 'wrong') drop(s); else finish(s, e.kind, e.done);
+      }
+    }
+
+    const joined = fresh.length > 0 && fresh.every((f) => f.silent);
+    if (joined) stack.classList.add('still');
+    if (fresh.length) {
+      // Newest on top; when several arrive together the top one drops in first.
+      flip(stack, () => fresh.forEach((f, i) => {
+        if (!f.silent && !calm) { f.s.el.classList.add('enter'); f.s.el.style.setProperty('--d', ((fresh.length - 1 - i) * 120) + 'ms'); }
+        stack.prepend(f.s.el);
+      }), fresh.every((f) => f.silent));
+      if (fresh.some((f) => !f.silent && f.red)) alarm();
+      if (fresh.some((f) => !f.silent)) {
+        askingAt = 0;
+        // ~ because the item may answer an older slice than the newest line; no transcript yet (NaN) or a replay of an
+        // old call (hours) shows nothing
+        const lag = Math.round((daySecs(hms(new Date())) - heard + 86400) % 86400);
+        lagEl.textContent = lag <= 600 ? '~' + lag + ' s behind' : '';
+      }
+    }
+    if (relayout) layoutAgenda(agInstant);
+    if (line) showLine(line);
+    fit();
+    if (joined) requestAnimationFrame(() => requestAnimationFrame(() => stack.classList.remove('still')));
+  }
+
+  // done: a say item shows the check and folds, then fades; expire fades straight away; an agenda item is struck through.
+  function finish(s, kind, at) {
+    if (s.store === commits) return drop(s);
+    if (s.store === agenda) return strike(s, at);
+    if (s.phase === 'retiring') return;
+    if (kind === 'done' && s.store === say) {
+      if (s.phase === 'done') return;
+      s.phase = 'done';
+      s.el.classList.add('done');
+      later(() => retire(s), FOLD_MS);
+    } else {
+      retire(s);
+    }
+  }
+
+  // wrong (the user's verdict), or a commitment withdrawn: off the board at once.
+  function drop(s) {
+    if (s.phase === 'gone' || s.phase === 'retiring') return;
+    s.phase = 'gone';
+    leave(s);
+  }
+
+  function strike(s, at) {
+    if (s.phase === 'struck') return;
+    s.phase = 'struck';
+    s.doneAt = +at || Date.now() / 1000;
+    s.el.classList.add('struck');
+  }
+
+  function retire(s) {
+    if (s.phase === 'retiring') return;
+    s.phase = 'retiring';
+    s.el.classList.add('retiring');
+    later(() => leave(s), calm ? 0 : 2000);
+  }
+
+  function leave(s) {
+    const el = s.el;
+    el.style.height = el.offsetHeight + 'px';
+    void el.offsetHeight;
+    el.classList.add('leaving');
+    setTimeout(() => { el.remove(); if (s.store.get(s.id) === s) s.store.delete(s.id); }, calm ? 0 : 500);
+  }
+
+  function clearBoard() {
+    epoch++;
+    say.clear(); agenda.clear(); commits.clear();
+    stack.replaceChildren(); alist.replaceChildren(); rlist.replaceChildren(); clist.replaceChildren();
+    agSig = ''; fitAt = 0;
+    showLine(null);
+  }
+
+  // ---------------------------------------------------------------- agenda: ranks are positions; raised items sink, newest first
+  function layoutAgenda(instant) {
+    const all = [...agenda.values()];
+    const open = all.filter((s) => s.phase === 'live').sort((a, b) => a.rank - b.rank || b.tie - a.tie);
+    const raised = all.filter((s) => s.phase === 'struck').sort((a, b) => b.doneAt - a.doneAt);
+    const sig = open.map((s) => s.id).join() + '|' + raised.map((s) => s.id).join();
+    if (sig === agSig) return;
+    agSig = sig;
+    flip([alist, rlist], () => {
+      open.forEach((s, i) => { alist.append(s.el); s.el.classList.toggle('lead', i === 0); });
+      raised.forEach((s) => { rlist.append(s.el); s.el.classList.remove('lead'); });
+    }, instant);
+  }
+
+  // FLIP: record positions, apply the DOM change, then glide each moved element from where it was (across boxes too).
+  function flip(boxes, mutate, instant) {
+    if (instant || calm) return mutate();
+    const kids = () => [].concat(boxes).flatMap((b) => [...b.children]);
+    const before = new Map(kids().map((k) => [k, k.getBoundingClientRect().top]));
+    mutate();
+    for (const k of kids()) {
+      if (!before.has(k)) continue;
+      const dy = before.get(k) - k.getBoundingClientRect().top;
+      if (dy) k.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'none' }],
+        { duration: 450, easing: 'cubic-bezier(.2,.7,.2,1)' });
+    }
+  }
+
+  // ---------------------------------------------------------------- fit the stack to its pane
+  // When the stack is taller than its pane, the oldest items fold to one line, as many as the overflow needs in
+  // one pass: amber/white first, an older red slab only as a last resort (shrunk, never hidden), never the newest
+  // item. When room opens up again the newest folded item is opened once more if it clearly fits. Passes are
+  // throttled and each item reopens at most once, so the stack cannot flap while a fold is still animating.
+  const saving = (e) => e.querySelector('.more-in').scrollHeight + (e.matches('.i3') ? 52 : 26) * U;   // height a fold gives back
+
+  function fit() {
+    pane.classList.toggle('clip', pane.scrollHeight - pane.clientHeight > 2);
+    const kids = [...stack.children], last = kids[kids.length - 1];
+    // layout position of the last item (offsetTop ignores the transforms of a glide in flight); scrollHeight cannot
+    // say how much room is spare, because it is never smaller than the pane
+    const room = stack.clientHeight - (last ? last.offsetTop + last.offsetHeight : 0);
+    stack.classList.toggle('clip', room < -2);
+    const t = performance.now();
+    if (t < fitAt) return;
+    if (room < -2) {
+      const old = kids.slice(1).reverse().filter((e) => !e.matches('.done, .compact, .retiring, .leaving'));
+      let deficit = -room;
+      for (const e of [...old.filter((e) => !e.matches('.i3')), ...old.filter((e) => e.matches('.i3'))]) {
+        if (deficit <= 0) break;
+        e.classList.add('compact');
+        deficit -= saving(e);
+        fitAt = t + 700;
+      }
+    } else {
+      const back = kids.find((e) => e.matches('.compact') && !e.matches('.done, .retiring, .leaving') && !e.dataset.reopened);
+      if (back && room > 1.1 * saving(back)) {
+        back.dataset.reopened = '1';
+        back.classList.remove('compact');
+        fitAt = t + 900;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- footer, clock, status
+  function showLine(e) {
+    lineEl.textContent = '';
+    if (!e) return;
+    const who = document.createElement('b');
+    who.className = 'who';
+    who.textContent = e.who || '';
+    lineEl.append(who, String(e.text || ''));
+    lineEl.classList.toggle('me', e.who === 'You');
+    if (!calm) { lineEl.classList.remove('roll'); void lineEl.offsetWidth; lineEl.classList.add('roll'); }
+  }
+
+  function alarm() {
+    if (calm) return;
+    const a = $('#alarm');
+    a.classList.remove('on');
+    void a.offsetWidth;
+    a.classList.add('on');
+  }
+
+  function tick() {
+    clock.textContent = hms(new Date());
+    const off = !linkUp || Date.now() - lastAt > SILENCE_MS;
+    if (askingAt && Date.now() - askingAt > ASK_MS) askingAt = 0;
+    const failed = !!askFailAt && Date.now() - askFailAt < 5000;
+    const deaf = { waiting: 'not recording', stalled: 'no transcript', ended: 'call ended' }[rec];
+    statusEl.textContent = off ? 'no signal' : failed ? 'not sent' : askingAt ? 'asking' : deaf || 'listening';
+    stateEl.classList.toggle('off', off || failed || rec === 'waiting' || rec === 'stalled');
+    stateEl.classList.toggle('ask', !off && !failed && !!askingAt);
+    board.classList.toggle('stale', off);
+    lastEl.textContent = lastEventAt ? hms(new Date(lastEventAt)) : '--:--:--';
+  }
+
+  // ---------------------------------------------------------------- ask: click an item, or press /
+  // The question goes to caddie.py (POST /ask), which sends it to the session as [USER]; the answer arrives as a say item.
+  function openAsk(s) {
+    if (picked) picked.el.classList.remove('picked');
+    picked = s;
+    if (s) s.el.classList.add('picked');
+    aboutEl.textContent = s ? 'About “' + typo(s.text) + '”' : '';
+    aboutEl.hidden = moreBtn.hidden = !s;
+    verdictBtns.forEach((b) => { b.hidden = !s; });
+    qEl.placeholder = s ? 'Ask about this (Enter alone: more detail), or type why, then Wrong' : 'Ask Caddie';
+    qEl.value = '';
+    form.hidden = false;
+    foot.classList.add('asking');
+    qEl.focus();
+  }
+
+  function closeAsk() {
+    if (picked) picked.el.classList.remove('picked');
+    picked = null;
+    form.hidden = true;
+    foot.classList.remove('asking');
+    qEl.blur();
+  }
+
+  function post(path, data) {
+    fetch(path, { method: 'POST', body: JSON.stringify({ token: TOKEN, ...data }) })
+      .then((r) => { if (!r.ok) throw new Error(r.status); })
+      .catch(() => { askingAt = 0; askFailAt = Date.now(); tick(); });
+  }
+
+  function sendAsk() {
+    const q = qEl.value.trim();
+    if (!q && !picked) return closeAsk();
+    const data = { q, id: picked ? picked.id : '', text: picked ? picked.text : '' };
+    closeAsk();
+    askingAt = Date.now(); askFailAt = 0; tick();
+    post('/ask', data);
+  }
+
+  // Done retires the picked item as the model would; Wrong takes it off and tells the model. Both reach the review.
+  function sendVerdict(verdict) {
+    const s = picked, note = qEl.value.trim();   // typed before Wrong: the reason, so the model knows what to avoid
+    closeAsk();
+    if (s) post('/mark', { id: s.id, verdict, note });
+  }
+
+  // The recording banner: the server sends Muesli's state on every change and in each snapshot.
+  const recEl = $('#rec'), recBtn = $('#recbtn');
+  const REC = {
+    waiting: ['Not recording. ', "Muesli isn't transcribing this call, so Caddie can't hear it."],
+    stalled: ['No transcript for a minute. ', 'Muesli is recording but nothing is arriving: check Muesli.'],
+    ended: ['Recording ended. ', 'Caddie is writing the wrap-up.'],
+  };
+  function setRec(e) {
+    rec = e.state;
+    const t = REC[rec];
+    recEl.hidden = !t;
+    if (t) {
+      recEl.classList.toggle('soft', rec !== 'waiting');
+      $('#rechead').textContent = t[0];
+      $('#rectext').textContent = t[1];
+      recBtn.hidden = !(rec === 'waiting' && e.can_start);
+      recBtn.disabled = false;
+      recBtn.textContent = 'Start recording';
+    }
+    tick();   // the footer's state follows at once, not on the next quarter second
+  }
+  recBtn.addEventListener('click', () => {
+    recBtn.disabled = true;
+    recBtn.textContent = 'Starting…';
+    fetch('/record', { method: 'POST', body: JSON.stringify({ token: TOKEN }) })
+      .then((r) => { if (!r.ok) throw new Error(r.status); })
+      .catch(() => { recBtn.disabled = false; recBtn.textContent = 'Failed: start it in Muesli'; });
+  });
+
+  // End: the first click arms it (no browser dialog), the second stops Caddie. Closing the window alone does not stop it,
+  // and nothing here stops it on unload, so a reload never ends a call.
+  const endBtn = $('#end');
+  let endArmed = 0;
+  endBtn.addEventListener('click', () => {
+    if (Date.now() - endArmed > 4000) {
+      endArmed = Date.now();
+      endBtn.textContent = 'End Caddie? Click again';
+      endBtn.classList.add('armed');
+      setTimeout(() => { if (Date.now() - endArmed >= 4000) { endBtn.textContent = '✕ End'; endBtn.classList.remove('armed'); } }, 4000);
+      return;
+    }
+    endBtn.disabled = true;
+    endBtn.textContent = 'Ending…';
+    fetch('/stop', { method: 'POST', body: JSON.stringify({ token: TOKEN }) })
+      .then((r) => { if (!r.ok) throw new Error(r.status); endBtn.textContent = 'Ended, close this window'; window.close(); })
+      .catch(() => { endBtn.disabled = false; endBtn.textContent = 'End failed: use Stop in the menu bar'; });
+  });
+
+  form.addEventListener('submit', (e) => { e.preventDefault(); sendAsk(); });
+  moreBtn.addEventListener('click', () => { qEl.value = ''; sendAsk(); });
+  verdictBtns.forEach((b) => b.addEventListener('click', () => sendVerdict(b.id)));
+  $('#askbtn').addEventListener('click', () => openAsk(null));
+  qEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAsk(); });
+  document.addEventListener('click', (e) => {          // delegated: items come and go
+    const el = e.target.closest('.it, .ag, .cm');
+    const s = el && (el.matches('.ag') ? agenda : el.matches('.cm') ? commits : say).get(el.dataset.id);
+    if (s && s.el === el) openAsk(s);
+    else if (!e.target.closest('.foot')) closeAsk();
+  });
+
+  addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target === qEl) return;
+    if (e.key === '/') { e.preventDefault(); openAsk(null); }
+    else if (e.key === 'Escape') closeAsk();
+    else if (e.key === 'Enter' && e.target.matches('.it, .ag, .cm')) { e.preventDefault(); e.target.click(); }
+    else if (e.key === 'r' || e.key === 'R') clearBoard();
+  });
+  addEventListener('resize', sizeU);
+  sizeU();
+  tick();
+  setInterval(() => { tick(); fit(); }, 250);
+})();
+</script>
+</body>
+</html>
