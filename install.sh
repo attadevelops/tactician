@@ -25,11 +25,11 @@ else
   echo "SwiftBar not found: install it (brew install --cask swiftbar) and run this again for the menu bar item"
 fi
 
+python3 "$C/caddie.py" --make-shortcut || echo "Could not make the shortcut (needs Muesli installed): run caddie --make-shortcut later"
+
 cat <<MSG
 Installed. Next:
   1. Edit $T/config.toml (your name, project roots, default project, participants).
   2. Add a context map in $T/contexts/ (see README, "Tenant folder"), and this company's terms to $T/denylist.
-  3. In the Shortcuts app: a new shortcut with Muesli's "Start Meeting Recording" action, its Title set to
-     Shortcut Input, named "Caddie Start Meeting".
-  4. Check: python3 $C/test_caddie.py
+  3. Check: python3 $C/test_caddie.py
 MSG

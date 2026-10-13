@@ -26,8 +26,9 @@ python3 test_caddie.py               # self-check, no meeting or Claude needed
 git clone https://github.com/attadevelops/caddie ~/Programs/caddie && ~/Programs/caddie/install.sh
 ```
 
-`install.sh` links the `caddie` command, the review skill and the SwiftBar plugin, turns on the pre-push guard, and
-creates the tenant folder with a starter config; it never overwrites a tenant's files. Each Mac moves itself to the
+`install.sh` links the `caddie` command, the review skill and the SwiftBar plugin, turns on the pre-push guard, makes
+the recording shortcut (see Recording) and creates the tenant folder with a starter config; it never overwrites a
+tenant's files. Each Mac moves itself to the
 newest release tag every 6 hours (and from the menu's Check for Updates), never during a call and never over local
 changes. To change Caddie from any Mac: the menu's Improve Caddie... opens a Claude session in the checkout, which
 files an issue or opens a pull request (`CLAUDE.md` has the rules).
@@ -67,9 +68,10 @@ config) so Caddie can tell.
 ## Recording
 
 When Caddie starts and Muesli is not recording, Caddie starts the recording, titled "<project> call", through Muesli's
-"Start Meeting Recording" App Intent. Make the shortcut once: in the Shortcuts app, a new shortcut with Muesli's Start
-Meeting Recording action, its Title set to Shortcut Input, named `Caddie Start Meeting` (or the config's `shortcut`).
-Without it Caddie says so and waits for you to start Muesli. Whenever Muesli is not transcribing, the board shows a red
+"Start Meeting Recording" App Intent, run by a shortcut named `Caddie Start Meeting` (or the config's `shortcut`).
+`install.sh` makes it (`caddie --make-shortcut`, then Add Shortcut in Shortcuts). Its first run asks to share the title
+with Muesli: choose Always Allow, or every start waits on that prompt. Without the shortcut Caddie says so and waits for
+you to start Muesli. Whenever Muesli is not transcribing, the board shows a red
 "Not recording" banner (with a Start recording button when the shortcut exists), and an amber one when a recording has
 sent no transcript for a minute; a question asked meanwhile is answered knowing nothing from the call has arrived.
 

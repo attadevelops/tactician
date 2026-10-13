@@ -240,6 +240,35 @@ def start_recording(title):
     return r.returncode == 0
 
 
+def make_shortcut():
+    """Write the shortcut (Muesli's Start Meeting Recording, Title = Shortcut Input), sign it and open the import."""
+    if has_shortcut():
+        print(f"The '{SHORTCUT}' shortcut exists.")
+        return 0
+    import plistlib
+    title = {"Value": {"string": "￼", "attachmentsByRange": {"{0, 1}": {"Type": "ExtensionInput"}}},
+             "WFSerializationType": "WFTextTokenString"}
+    action = {"WFWorkflowActionIdentifier": "com.muesli.app.StartMeetingIntent",
+              "WFWorkflowActionParameters": {
+                  "AppIntentDescriptor": {"AppIntentIdentifier": "StartMeetingIntent", "BundleIdentifier": "com.muesli.app",
+                                          "Name": "Muesli", "TeamIdentifier": "58W55QJ567"},
+                  "meetingTitle": title}}
+    shortcut = {"WFWorkflowActions": [action], "WFWorkflowClientVersion": "3000",
+                "WFWorkflowMinimumClientVersion": 900, "WFWorkflowMinimumClientVersionString": "900",
+                "WFWorkflowIcon": {"WFWorkflowIconGlyphNumber": 59511, "WFWorkflowIconStartColor": 4282601983},
+                "WFWorkflowHasShortcutInputVariables": True,
+                "WFWorkflowInputContentItemClasses": ["WFStringContentItem", "WFGenericFileContentItem", "WFRichTextContentItem"],
+                "WFWorkflowOutputContentItemClasses": [], "WFWorkflowImportQuestions": [], "WFWorkflowTypes": [],
+                "WFQuickActionSurfaces": []}
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    raw, signed = LOG_DIR / ".shortcut.plist", LOG_DIR / f"{SHORTCUT}.shortcut"
+    raw.write_bytes(plistlib.dumps(shortcut, fmt=plistlib.FMT_BINARY))
+    subprocess.run(["shortcuts", "sign", "--mode", "anyone", "-i", str(raw), "-o", str(signed)], check=True)
+    subprocess.run(["open", str(signed)], check=True)
+    print("In Shortcuts: Add Shortcut. On its first run (Caddie's first start) choose Always Allow, so it can pass the title to Muesli.")
+    return 0
+
+
 def wait_for_recording(report):
     last = 0
     while True:
@@ -786,7 +815,10 @@ def main():
     ap.add_argument("--with", dest="participants", metavar="NAMES", help='who is on the call, e.g. "Sam (manager, not technical), Pat (tech lead)"')
     ap.add_argument("--port", type=int, default=8770, help="board page port (the first free of ten from here)")
     ap.add_argument("--shell-config", action="store_true", help="print the tenant settings as shell variables (the menu bar)")
+    ap.add_argument("--make-shortcut", action="store_true", help="create the shortcut Caddie uses to start Muesli recordings")
     a = ap.parse_args()
+    if a.make_shortcut:
+        return make_shortcut()
     if a.shell_config:
         q = shlex.quote
         print(f"CADDIE_HOME={q(str(HOME))}; DEFAULT_PROJECT={q(CONFIG.get('default_project', ''))}; "
@@ -847,7 +879,7 @@ def main():
                 can = has_shortcut()
                 session.set_rec("waiting", can_start=can)
                 if not can:
-                    session.out(c("33", f"{now()} Muesli is not recording and there is no '{SHORTCUT}' shortcut: start the recording in Muesli"))
+                    session.out(c("33", f"{now()} Muesli is not recording and there is no '{SHORTCUT}' shortcut (make it once: caddie --make-shortcut): start the recording in Muesli"))
                 elif start_recording(session.title):
                     session.out(c("2", f"{now()} asked Muesli to start recording '{session.title}'"))
                 else:
