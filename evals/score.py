@@ -1,6 +1,6 @@
-"""Grade a caddie.py log against an expectations file (meeting-<id>.toml in the tenant's evals folder).
+"""Grade a tactician.py log against an expectations file (meeting-<id>.toml in the tenant's evals folder).
 
-  python3 evals/score.py ~/.caddie/logs/<file>.md --eval ~/.caddie/evals/meeting-<id>.toml [--slack 300]
+  python3 evals/score.py ~/.tactician/logs/<file>.md --eval ~/.tactician/evals/meeting-<id>.toml [--slack 300]
   python3 evals/score.py --selftest
 """
 import argparse

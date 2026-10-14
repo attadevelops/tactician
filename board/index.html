@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  The live board: the page caddie.py serves at GET / (this file is board/index.html). It listens to the
+  The live board: the page tactician.py serves at GET / (this file is board/index.html). It listens to the
   server-sent events that same server streams at GET /events and draws the Say and Agenda panes from them.
   To try it without Claude, run prototype/replay_events.py and open http://127.0.0.1:8791/
   Keys: R clears the board in this browser only (the server keeps its own state); / opens the ask field, and so does a
@@ -12,7 +12,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Caddie</title>
+<title>Tactician</title>
 <style>
   :root {
     --field: #0b1215;
@@ -364,13 +364,13 @@
 
   <footer class="foot">
     <div class="lw"><div id="line"></div>
-      <form id="ask" hidden autocomplete="off"><span id="about"></span><input id="q" aria-label="Ask Caddie"><button type="button" id="more">More detail</button><button type="button" id="done">Done</button><button type="button" id="wrong">Wrong</button></form>
+      <form id="ask" hidden autocomplete="off"><span id="about"></span><input id="q" aria-label="Ask Tactician"><button type="button" id="more">More detail</button><button type="button" id="done">Done</button><button type="button" id="wrong">Wrong</button></form>
     </div>
-    <button type="button" id="askbtn" title="Ask Caddie (/)">Ask</button>
+    <button type="button" id="askbtn" title="Ask Tactician (/)">Ask</button>
     <span class="state" id="state" role="status"><span class="dot"></span><span id="status">listening</span></span>
-    <span class="lag" id="lag" title="Speech to board: how long after the newest line Caddie had heard the last item arrived"></span>
+    <span class="lag" id="lag" title="Speech to board: how long after the newest line Tactician had heard the last item arrived"></span>
     <span class="last">last event <time id="last">--:--:--</time></span>
-    <button type="button" id="end" title="End Caddie: during a call it writes the wrap-up first">✕ End</button>
+    <button type="button" id="end" title="End Tactician: during a call it writes the wrap-up first">✕ End</button>
   </footer>
 </div>
 
@@ -383,7 +383,7 @@
   const clock = $('#clock'), lineEl = $('#line'), statusEl = $('#status'), stateEl = $('#state'), lastEl = $('#last');
   const foot = $('.foot'), form = $('#ask'), qEl = $('#q'), aboutEl = $('#about'), moreBtn = $('#more'), lagEl = $('#lag');
   const verdictBtns = [$('#done'), $('#wrong')];
-  const TOKEN = '__CADDIE_TOKEN__';   // caddie.py writes the run's token here; POST /ask refuses a request without it
+  const TOKEN = '__TACTICIAN_TOKEN__';   // tactician.py writes the run's token here; POST /ask refuses a request without it
 
   const FOLD_MS = 3000;       // a done say item keeps its check and one-line fold this long, then fades
   const SILENCE_MS = 60000;   // no event for this long: no signal
@@ -711,7 +711,7 @@
   }
 
   // ---------------------------------------------------------------- ask: click an item, or press /
-  // The question goes to caddie.py (POST /ask), which sends it to the session as [USER]; the answer arrives as a say item.
+  // The question goes to tactician.py (POST /ask), which sends it to the session as [USER]; the answer arrives as a say item.
   function openAsk(s) {
     if (picked) picked.el.classList.remove('picked');
     picked = s;
@@ -719,7 +719,7 @@
     aboutEl.textContent = s ? 'About “' + typo(s.text) + '”' : '';
     aboutEl.hidden = moreBtn.hidden = !s;
     verdictBtns.forEach((b) => { b.hidden = !s; });
-    qEl.placeholder = s ? 'Ask about this (Enter alone: more detail), or type why, then Wrong' : 'Ask Caddie';
+    qEl.placeholder = s ? 'Ask about this (Enter alone: more detail), or type why, then Wrong' : 'Ask Tactician';
     qEl.value = '';
     form.hidden = false;
     foot.classList.add('asking');
@@ -759,9 +759,9 @@
   // The recording banner: the server sends Muesli's state on every change and in each snapshot.
   const recEl = $('#rec'), recBtn = $('#recbtn');
   const REC = {
-    waiting: ['Not recording. ', "Muesli isn't transcribing this call, so Caddie can't hear it."],
+    waiting: ['Not recording. ', "Muesli isn't transcribing this call, so Tactician can't hear it."],
     stalled: ['No transcript for a minute. ', 'Muesli is recording but nothing is arriving: check Muesli.'],
-    ended: ['Recording ended. ', 'Caddie is writing the wrap-up.'],
+    ended: ['Recording ended. ', 'Tactician is writing the wrap-up.'],
   };
   function setRec(e) {
     rec = e.state;
@@ -785,14 +785,14 @@
       .catch(() => { recBtn.disabled = false; recBtn.textContent = 'Failed: start it in Muesli'; });
   });
 
-  // End: the first click arms it (no browser dialog), the second stops Caddie. Closing the window alone does not stop it,
+  // End: the first click arms it (no browser dialog), the second stops Tactician. Closing the window alone does not stop it,
   // and nothing here stops it on unload, so a reload never ends a call.
   const endBtn = $('#end');
   let endArmed = 0;
   endBtn.addEventListener('click', () => {
     if (Date.now() - endArmed > 4000) {
       endArmed = Date.now();
-      endBtn.textContent = 'End Caddie? Click again';
+      endBtn.textContent = 'End Tactician? Click again';
       endBtn.classList.add('armed');
       setTimeout(() => { if (Date.now() - endArmed >= 4000) { endBtn.textContent = '✕ End'; endBtn.classList.remove('armed'); } }, 4000);
       return;

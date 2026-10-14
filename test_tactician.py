@@ -1,10 +1,10 @@
-"""Self-check: python3 test_caddie.py (stdlib only, no live meeting needed)."""
+"""Self-check: python3 test_tactician.py (stdlib only, no live meeting needed)."""
 import os
 import tempfile
 import time
 from datetime import datetime, timezone
-os.environ["CADDIE_HOME"] = tempfile.mkdtemp()  # hermetic: never the machine's real tenant folder
-import caddie as la
+os.environ["TACTICIAN_HOME"] = tempfile.mkdtemp()  # hermetic: never the machine's real tenant folder
+import tactician as la
 la.USER = "Alex"
 
 SAMPLE = """[11:33:10] Speaker 1: About your PTO. originally you were talking about
@@ -120,7 +120,7 @@ def http(path, body=None, host=None):
         return e.code
 asked = []; s.ask = lambda q, iid="", text="": asked.append((q, iid, text)) or True
 page = urllib.request.urlopen(url, timeout=2).read().decode()
-assert la.BoardHandler.token in page and "__CADDIE_TOKEN__" not in page
+assert la.BoardHandler.token in page and "__TACTICIAN_TOKEN__" not in page
 assert http("ask", {"token": "nope", "q": "x"}) == 403 and http("ask", {"token": "\u00e9", "q": "x"}) == 403 and http("ask", {}) == 403
 assert http("ask", {"token": la.BoardHandler.token, "q": "x"}, host="evil.example:8790") == 403 and http("", host="evil.example") == 403
 assert not asked
@@ -181,10 +181,10 @@ assert la.split_packets("no sections") == {}
 print("brief ok")
 
 # replay source: a past run's log (indented transcript lines only; colour codes, notes and status lines dropped)
-(tmp / "caddie-proj-20261008-094811.md").write_text(
-    "# caddie-proj-20261008-094811\nproject: /x\nstarted: 2026-10-08T09:48:11\n\n\x1b[2m09:48:11 Call date\x1b[0m\n"
+(tmp / "tactician-proj-20261008-094811.md").write_text(
+    "# tactician-proj-20261008-094811\nproject: /x\nstarted: 2026-10-08T09:48:11\n\n\x1b[2m09:48:11 Call date\x1b[0m\n"
     "\x1b[2m  [09:47:13] Others: hello there\x1b[0m\n09:53:15 NOTE\nNOTE: not transcript\n\n  [09:47:18] You: hi\n")
-m = la.load_log(tmp / "caddie-proj-20261008-094811.md")
+m = la.load_log(tmp / "tactician-proj-20261008-094811.md")
 assert m["id"] == "20261008-094811" and m["start_time"] == "2026-10-08 09:48", m
 assert [r["text"] for r in la.parse_transcript(m["raw_transcript"])] == ["hello there", "hi"]
 assert la.last_wrapup(tmp / "proj", before="2026-10-07") == "old" and la.last_wrapup(tmp / "proj", before="2026-10-01") == ""

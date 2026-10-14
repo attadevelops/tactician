@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""caddie: feed a live Muesli meeting transcript into a Claude Code session for a project and put
+"""tactician: feed a live Muesli meeting transcript into a Claude Code session for a project and put
 what to say on the board (and in the console).
 
-  caddie                           the default project's call (config default_project): wait for Muesli to record, tail,
-                                   exit on completion
-  caddie <project>                 the same for another project
-  caddie <project> --replay 48     replay a past Muesli meeting through the same path
-  caddie <project> --replay logs/<run>.md   replay a past run's log (the live chunks, before Muesli's rewrite)
-  caddie --probe                   tail Muesli only (no Claude), print per-row lag
+  tactician                           the default project's call (config default_project): wait for Muesli to record, tail,
+                                      exit on completion
+  tactician <project>                 the same for another project
+  tactician <project> --replay 48     replay a past Muesli meeting through the same path
+  tactician <project> --replay logs/<run>.md   replay a past run's log (the live chunks, before Muesli's rewrite)
+  tactician --probe                   tail Muesli only (no Claude), print per-row lag
 
 <project> is a folder path, or a folder name under a configured project root; run it from any directory.
-Configuration and all call data live in the tenant folder, ~/.caddie (or $CADDIE_HOME).
+Configuration and all call data live in the tenant folder, ~/.tactician (or $TACTICIAN_HOME).
 Type a line while it runs to ask the assistant something directly, or ask on the board: click an item, or press /.
 """
 import argparse
@@ -34,7 +34,7 @@ from pathlib import Path
 
 MUESLI_DB = Path.home() / "Library/Application Support/Muesli/muesli.db"
 # This machine's tenant: everything about one company's calls lives here, never in the repo (README, "Tenant folder").
-HOME = Path(os.environ.get("CADDIE_HOME") or Path.home() / ".caddie")
+HOME = Path(os.environ.get("TACTICIAN_HOME") or Path.home() / ".tactician")
 CONFIG = tomllib.loads((HOME / "config.toml").read_text()) if (HOME / "config.toml").is_file() else {}
 USER = CONFIG.get("user") or "the user"
 ROOTS = [Path(r).expanduser() for r in CONFIG.get("project_roots", [])]  # project folders are found by name under these
@@ -51,10 +51,10 @@ CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"  # Claude Code's session 
 _NOISE = ("<command-", "<local-command", "<system-reminder", "<task-notification", "[Request interrupted",
           "This session is being continued", "Caveat:")
 # The user's macOS shortcut running Muesli's "Start Meeting Recording" App Intent, its Title set to the Shortcut Input.
-SHORTCUT = os.environ.get("CADDIE_SHORTCUT") or CONFIG.get("shortcut") or "Caddie Start Meeting"
+SHORTCUT = os.environ.get("TACTICIAN_SHORTCUT") or CONFIG.get("shortcut") or "Tactician Start Meeting"
 _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
-PROMPT = """You are Caddie, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
+PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
 
 Each user message is a new slice of the live speech-to-text transcript, lines like "[HH:MM:SS] Speaker: text". "You" is {user}. The live transcript labels everyone else "Others" (speaker names only arrive after the call), so name a person only when the content makes it certain (whoever runs the call and hands out action items; the front-end developer answering front-end questions); otherwise say "the room". Expect garbled words, missing punctuation and phonetic spellings of project terms. A message starting with "[CONTEXT]" names the call date and the participants. "[BACKLOG]" is transcript from before you attached: read it and reply "..." unless something is urgent. "[USER]" is {user} asking you directly, typed, or by clicking a board item ("About s3 ..."): always answer, as a say item, with what the board did not already say; when they state a fact instead of asking, it is settled like an [UPDATE]: change the board, no say item. "[UPDATE]" is what {user} and their own agent sessions (the coding assistants working in their project folders) said since your last look, newest last; it is newer than the brief and the digest. A decision, approval or status in it is settled: retire the agenda and say items it settles, never raise them again, and use its facts from then on. The brief's "recent agent sessions" block is the same record from before the call. A "[BOARD]" line at the end of a slice lists what is on their board right now, with ids; "raised" are agenda items already done, which stay on their board struck through. "[WRONG]" is {user} marking a board item wrong or useless; it is already gone from their board: never repeat that point or any fact in it. "[MEETING ENDED]" asks for the wrap-up.
 
@@ -138,7 +138,7 @@ def last_wrapup(project, before=None):
 def agent_activity(dirs, since, until=None, limit=12000, each=700):
     """What the user and their own Claude Code sessions in these folders said between since and until (epoch seconds), oldest
     first: their words (pasted chat included) and the agents' replies, with tool traffic and harness noise left out, the
-    newest kept when it runs over `limit` characters. Caddie's own sessions run under /private/tmp and never match."""
+    newest kept when it runs over `limit` characters. Tactician's own sessions run under /private/tmp and never match."""
     keys = tuple("-" + re.sub(r"[^A-Za-z0-9]", "-", str(d).strip("/")) for d in dirs)  # Claude Code's folder naming
     found = []
     for p in CLAUDE_PROJECTS.glob("*"):
@@ -171,7 +171,7 @@ def agent_activity(dirs, since, until=None, limit=12000, each=700):
 
 
 def claude_md(dirs):
-    """The CLAUDE.md of each readable folder (the engagement digest). Caddie puts it in the prompt itself, so a run can save
+    """The CLAUDE.md of each readable folder (the engagement digest). Tactician puts it in the prompt itself, so a run can save
     exactly what it saw and a replay can load that copy instead of today's file, which may already know how the call ended."""
     return "\n\n".join(f"--- {d}/CLAUDE.md ---\n{(Path(d) / 'CLAUDE.md').read_text().strip()}"
                        for d in dirs if (Path(d) / "CLAUDE.md").is_file())
@@ -265,7 +265,7 @@ def make_shortcut():
     raw.write_bytes(plistlib.dumps(shortcut, fmt=plistlib.FMT_BINARY))
     subprocess.run(["shortcuts", "sign", "--mode", "anyone", "-i", str(raw), "-o", str(signed)], check=True)
     subprocess.run(["open", str(signed)], check=True)
-    print("In Shortcuts: Add Shortcut. On its first run (Caddie's first start) choose Always Allow, so it can pass the title to Muesli.")
+    print("In Shortcuts: Add Shortcut. On its first run (Tactician's first start) choose Always Allow, so it can pass the title to Muesli.")
     return 0
 
 
@@ -418,7 +418,7 @@ class BoardHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(403)
             return
         if self.path.split("?")[0] != "/events":
-            body = BOARD_HTML.read_bytes().replace(b"__CADDIE_TOKEN__", self.token.encode()) if BOARD_HTML.exists() else b"board/index.html missing"
+            body = BOARD_HTML.read_bytes().replace(b"__TACTICIAN_TOKEN__", self.token.encode()) if BOARD_HTML.exists() else b"board/index.html missing"
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -497,7 +497,7 @@ class Session:
         # Lean context: the session runs from an empty directory under /private/tmp, so the project's own CLAUDE.md, rules,
         # hooks and skills are not auto-discovered (37k tokens per turn in one large project, used by no note in a measured call); the
         # digest reaches it through the prompt above, not through add-dir loading. A cwd under ~ would load ~/AGENTS.md.
-        self.cwd = Path("/private/tmp/caddie") / name
+        self.cwd = Path("/private/tmp/tactician") / name
         self.cwd.mkdir(parents=True, exist_ok=True)
         self.log = log
         self.show_transcript = show_transcript
@@ -815,13 +815,13 @@ def main():
     ap.add_argument("--with", dest="participants", metavar="NAMES", help='who is on the call, e.g. "Sam (manager, not technical), Pat (tech lead)"')
     ap.add_argument("--port", type=int, default=8770, help="board page port (the first free of ten from here)")
     ap.add_argument("--shell-config", action="store_true", help="print the tenant settings as shell variables (the menu bar)")
-    ap.add_argument("--make-shortcut", action="store_true", help="create the shortcut Caddie uses to start Muesli recordings")
+    ap.add_argument("--make-shortcut", action="store_true", help="create the shortcut Tactician uses to start Muesli recordings")
     a = ap.parse_args()
     if a.make_shortcut:
         return make_shortcut()
     if a.shell_config:
         q = shlex.quote
-        print(f"CADDIE_HOME={q(str(HOME))}; DEFAULT_PROJECT={q(CONFIG.get('default_project', ''))}; "
+        print(f"TACTICIAN_HOME={q(str(HOME))}; DEFAULT_PROJECT={q(CONFIG.get('default_project', ''))}; "
               f"PARTICIPANTS={q(CONFIG.get('participants', ''))}; PROFILE={q(CONFIG.get('browser_profile', 'Default'))}; "
               f"ROOTS=({' '.join(q(str(r)) for r in ROOTS)})")
         return 0
@@ -843,9 +843,9 @@ def main():
             print(c("33", f"{now()} no context snapshot for {a.replay}: this replay reads today's digest and brief, which may know the outcome"))
         start = local_time(m["start_time"])
     else:  # ponytail: no calendar signal to pick the project, so say it loudly; Ctrl-C before the end archives nothing
-        print(c("1", f"{now()} Caddie for {project.name}. Not this meeting's project? Ctrl-C and run: caddie <project>"))
+        print(c("1", f"{now()} Tactician for {project.name}. Not this meeting's project? Ctrl-C and run: tactician <project>"))
         m, start = None, datetime.now().strftime("%Y-%m-%d %H:%M")  # warm-up: the board comes up now, Muesli's start replaces this
-    base = f"caddie-{project.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}" + (f"-replay{m['id']}" if a.replay else "")
+    base = f"tactician-{project.name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}" + (f"-replay{m['id']}" if a.replay else "")
     name, n = base, 1
     while True:  # exclusive create: two runs started in the same second must not share a log
         try:
@@ -857,7 +857,7 @@ def main():
               + (f"meeting: {m['id']} at {start}\n" if m else "") + f"args: {json.dumps(opts)}\n\n")
     session = Session(project, a.model, a.effort, name, log, a.show_transcript,
                       before=start[:10] if a.replay else None, pinned=pinned)  # a replay's brief stops before the call it replays
-    session.title = f"{project.name} call"  # the Muesli recording's title when Caddie starts it
+    session.title = f"{project.name} call"  # the Muesli recording's title when Tactician starts it
     url = serve_board(session, a.port)
     session.out(c("2", f"{now()} board: {url or 'no free port'}"))
     if url and sys.stdin.isatty():  # the configured Chrome profile, as an app window on the side monitor
@@ -875,11 +875,11 @@ def main():
             feed = tail_replay(rows, a.speed)
             session.set_rec("recording")
         else:
-            if not active_meeting():  # starting Caddie starts the recording, through Muesli's own Shortcuts action
+            if not active_meeting():  # starting Tactician starts the recording, through Muesli's own Shortcuts action
                 can = has_shortcut()
                 session.set_rec("waiting", can_start=can)
                 if not can:
-                    session.out(c("33", f"{now()} Muesli is not recording and there is no '{SHORTCUT}' shortcut (make it once: caddie --make-shortcut): start the recording in Muesli"))
+                    session.out(c("33", f"{now()} Muesli is not recording and there is no '{SHORTCUT}' shortcut (make it once: tactician --make-shortcut): start the recording in Muesli"))
                 elif start_recording(session.title):
                     session.out(c("2", f"{now()} asked Muesli to start recording '{session.title}'"))
                 else:

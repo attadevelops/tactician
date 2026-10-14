@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Throwaway test server for board/index.html: replays a recorded run as the live board's event stream.
 
-It answers like caddie.py's BoardHandler: GET / serves board/index.html, GET /events streams
+It answers like tactician.py's BoardHandler: GET / serves board/index.html, GET /events streams
 server-sent events, a snapshot of the open items first (seq 0), then the run's events. Every connection
 plays its own copy of the run from the start. The run is --run, default the newest run in the tenant's logs folder
 (.items.jsonl for the board events, .md for the transcript lines, which the jsonl does not have). Both streams run
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LOGS = Path(os.environ.get("CADDIE_HOME") or Path.home() / ".caddie") / "logs"
+LOGS = Path(os.environ.get("TACTICIAN_HOME") or Path.home() / ".tactician") / "logs"
 RUN = ""  # set from --run in main()
 PAGE = ROOT / "board" / "index.html"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -72,7 +72,7 @@ def apply(open_items, e, born):
     elif e["kind"] == "agenda":
         open_items[e["id"]] = {"id": e["id"], "pane": "agenda", "text": e["text"], "rank": e["rank"], "born": born}
     elif e["kind"] in ("done", "expire") and e.get("pane") == "agenda" and e["id"] in open_items:
-        open_items[e["id"]]["done"] = born  # raised agenda items stay, struck through (caddie.py since 2026-10-09)
+        open_items[e["id"]]["done"] = born  # raised agenda items stay, struck through (tactician.py since 2026-10-09)
     elif e["kind"] in ("done", "expire"):
         open_items.pop(e["id"], None)
 

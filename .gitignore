@@ -1,4 +1,4 @@
-# Tenant data lives in ~/.caddie (README, "Tenant folder"); these stay out even if a run writes here.
+# Tenant data lives in ~/.tactician (README, "Tenant folder"); these stay out even if a run writes here.
 logs/
 meetings/
 contexts/

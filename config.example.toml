@@ -1,5 +1,5 @@
-# Caddie tenant config: copy to ~/.caddie/config.toml (or $CADDIE_HOME/config.toml) and edit.
-# One tenant folder per machine; nothing in it is ever committed to the caddie repo.
+# Tactician tenant config: copy to ~/.tactician/config.toml (or $TACTICIAN_HOME/config.toml) and edit.
+# One tenant folder per machine; nothing in it is ever committed to the tactician repo.
 
 # Your name as the prompt and the judge use it ("You" in the transcript is this person).
 user = "Alex"
@@ -8,7 +8,7 @@ user = "Alex"
 # their sub-folders (except names starting with "_"), and projects under one root share one stream of wrap-ups.
 project_roots = ["~/work/acme"]
 
-# The project a bare `caddie` (and the menu bar's Start <project> Call) uses.
+# The project a bare `tactician` (and the menu bar's Start <project> Call) uses.
 default_project = "acme-web"
 
 # Who is usually on the call, with roles; the menu bar passes it to every start until you edit the names.
@@ -19,4 +19,4 @@ participants = "Sam (project manager, not technical, runs the call), Pat (client
 browser_profile = "Default"
 
 # The macOS shortcut that runs Muesli's "Start Meeting Recording" action with its Title set to the Shortcut Input.
-shortcut = "Caddie Start Meeting"
+shortcut = "Tactician Start Meeting"

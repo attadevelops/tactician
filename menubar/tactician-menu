@@ -1,10 +1,10 @@
 #!/bin/bash
-# Actions for the Caddie menu bar item (menubar/caddie.5s.sh, a SwiftBar plugin): start [project] | start-with | stop |
-# board | wrapup | review | update | improve. Caddie runs in the background; the board is its window, logs/menubar.out its console.
+# Actions for the Tactician menu bar item (menubar/tactician.5s.sh, a SwiftBar plugin): start [project] | start-with | stop |
+# board | wrapup | review | update | improve. Tactician runs in the background; the board is its window, logs/menubar.out its console.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/Applications/cmux.app/Contents/Resources/bin:$PATH"  # SwiftBar's PATH is bare
 C="$(cd "$(dirname "$0")/.." && pwd)"
-eval "$(python3 "$C/caddie.py" --shell-config)"  # CADDIE_HOME, DEFAULT_PROJECT, PARTICIPANTS, PROFILE, ROOTS
-OUT="$CADDIE_HOME/logs/menubar.out"; PID="$CADDIE_HOME/logs/menubar.pid"; NAMES="$CADDIE_HOME/logs/menubar.participants"
+eval "$(python3 "$C/tactician.py" --shell-config)"  # TACTICIAN_HOME, DEFAULT_PROJECT, PARTICIPANTS, PROFILE, ROOTS
+OUT="$TACTICIAN_HOME/logs/menubar.out"; PID="$TACTICIAN_HOME/logs/menubar.pid"; NAMES="$TACTICIAN_HOME/logs/menubar.participants"
 
 names() { cat "$NAMES" 2>/dev/null || echo "$PARTICIPANTS"; }  # the last names used; the config's at first
 running() { [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; }
@@ -14,26 +14,26 @@ open_board() { local u; u=$(board_url) && open -na "Google Chrome" --args --prof
 case "$1" in
   start-with)  # who is on the call, prefilled with last time's answer
     last=$(names | tr -d '"\\')
-    names=$(osascript -e "text returned of (display dialog \"Who is on the call?\" default answer \"$last\" with title \"Caddie\")") || exit 0
+    names=$(osascript -e "text returned of (display dialog \"Who is on the call?\" default answer \"$last\" with title \"Tactician\")") || exit 0
     printf '%s' "$names" > "$NAMES"
     exec "$0" start ;;
-  start)  # $2: the project folder; none = caddie.py's default
+  start)  # $2: the project folder; none = tactician.py's default
     if running; then open_board; exit 0; fi
-    mkdir -p "$CADDIE_HOME/logs"
+    mkdir -p "$TACTICIAN_HOME/logs"
     args=(); [ -n "$2" ] && args+=("$2"); n=$(names); [ -n "$n" ] && args+=(--with "$n")
     set -m  # own process group, so the job outlives this script and Stop's SIGINT reaches it
-    nohup "$C/caddie.py" "${args[@]}" < /dev/null > "$OUT" 2>&1 &
+    nohup "$C/tactician.py" "${args[@]}" < /dev/null > "$OUT" 2>&1 &
     echo $! > "$PID"
     for _ in $(seq 40); do board_url > /dev/null && break; sleep 0.25; done
     open_board ;;
   stop) running && kill -INT "$(cat "$PID")" ;;  # Ctrl-C: no wrap-up; a call that ends in Muesli wraps up by itself
   board) open_board ;;
   wrapup)
-    f=$(ls -t "$CADDIE_HOME"/meetings/*/*.md 2>/dev/null | grep -v -- '-packet-' | head -1)
+    f=$(ls -t "$TACTICIAN_HOME"/meetings/*/*.md 2>/dev/null | grep -v -- '-packet-' | head -1)
     [ -n "$f" ] && open -e "$f" ;;
-  review) cmux new-workspace --cwd "$C" --command "claude /caddie-review" --description "Caddie review" ;;
+  review) cmux new-workspace --cwd "$C" --command "claude /tactician-review" --description "Tactician review" ;;
   improve)  # a Claude session in the checkout: file an issue or make a change (CLAUDE.md there says how)
-    if command -v cmux > /dev/null; then cmux new-workspace --cwd "$C" --command "claude" --description "Improve Caddie"
+    if command -v cmux > /dev/null; then cmux new-workspace --cwd "$C" --command "claude" --description "Improve Tactician"
     else open -a Terminal "$C"; fi ;;
   update)  # to the newest release tag: never during a call, never over local changes or unreleased local commits
     running && exit 0

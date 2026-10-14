@@ -1,8 +1,8 @@
 #!/bin/bash
 # Never push a tenant's data. Installed with: git config core.hooksPath hooks
-# Blocks a push when a pushed commit descends from a private history (root SHAs in $CADDIE_HOME/blocked-roots), or when
-# the pushed tree or the new commit messages contain a term from $CADDIE_HOME/denylist (one per line, whole words, any case).
-T="${CADDIE_HOME:-$HOME/.caddie}"
+# Blocks a push when a pushed commit descends from a private history (root SHAs in $TACTICIAN_HOME/blocked-roots), or when
+# the pushed tree or the new commit messages contain a term from $TACTICIAN_HOME/denylist (one per line, whole words, any case).
+T="${TACTICIAN_HOME:-$HOME/.tactician}"
 zero=0000000000000000000000000000000000000000
 while read -r lref lsha rref rsha; do
   [ "$lsha" = "$zero" ] && continue

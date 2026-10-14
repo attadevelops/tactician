@@ -1,7 +1,7 @@
-"""LLM-as-judge for a caddie run log (the regex scorer is evals/score.py).
+"""LLM-as-judge for a tactician run log (the regex scorer is evals/score.py).
 
-  python3 evals/judge.py ~/.caddie/logs/<run>.md [--eval FILE] [--model sonnet] [--dry-run]
-  (no --eval: ~/.caddie/evals/meeting-<id>.toml for the log's Muesli meeting if it exists, else no expectations)
+  python3 evals/judge.py ~/.tactician/logs/<run>.md [--eval FILE] [--model sonnet] [--dry-run]
+  (no --eval: ~/.tactician/evals/meeting-<id>.toml for the log's Muesli meeting if it exists, else no expectations)
   python3 evals/judge.py --selftest
 
 One headless, read-only Claude call checks every note against its cited source and the run against the expectations;
@@ -21,8 +21,8 @@ from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent)]  # score.py is a sibling, caddie.py sits in the repo root
-import caddie as la  # DENY_SETTINGS, CLAUDE_BIN, load_context
+sys.path[:0] = [str(HERE), str(HERE.parent)]  # score.py is a sibling, tactician.py sits in the repo root
+import tactician as la  # DENY_SETTINGS, CLAUDE_BIN, load_context
 import score  # parse, ANSI, TRANSCRIPT, HEAD, WALL
 TIMEOUT = 900  # seconds before the judge is abandoned
 GRADED = re.compile(r"^(MISS|HIT)\b[^.]*\.\s*")  # leading "MISS in the live run." in a toml note
@@ -173,7 +173,7 @@ def build_prompt(header, transcript, notes, expect, dirs, context, asof=None, br
 
 
 def command(prompt, model, dirs):
-    """Same safety flags as caddie.Session, minus the stream-json plumbing: read-only tools, deny list, no local settings."""
+    """Same safety flags as tactician.Session, minus the stream-json plumbing: read-only tools, deny list, no local settings."""
     assert len(prompt) < 200000, len(prompt)  # argv limit guard
     return [la.CLAUDE_BIN, "-p", prompt, "--model", model, "--output-format", "json", "--permission-mode", "dontAsk",
             "--setting-sources", "project", "--strict-mcp-config", "--max-turns", "40",
