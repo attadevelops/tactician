@@ -16,7 +16,7 @@ touch "$T/denylist" "$T/blocked-roots"                       # terms and private
 
 mkdir -p "$HOME/.local/bin" "$HOME/.claude/skills"
 ln -sfn "$C/tactician.py" "$HOME/.local/bin/tactician"
-ln -sfn "$C/skills/tactician-review" "$HOME/.claude/skills/tactician-review"
+for s in tactician-review tactician-setup; do ln -sfn "$C/skills/$s" "$HOME/.claude/skills/$s"; done
 P=$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)
 if [ -n "$P" ]; then
   printf '#!/bin/bash\n# <bitbar.title>Tactician</bitbar.title>\n# The plugin lives in the tactician checkout; this file only runs it.\nexec "%s/menubar/tactician.5s.sh"\n' "$C" > "$P/tactician.5s.sh"
@@ -28,8 +28,5 @@ fi
 python3 "$C/tactician.py" --make-shortcut || echo "Could not make the shortcut (needs Muesli installed): run tactician --make-shortcut later"
 
 cat <<MSG
-Installed. Next:
-  1. Edit $T/config.toml (your name, project roots, default project, participants).
-  2. Add a context map in $T/contexts/ (see README, "Tenant folder"), and this company's terms to $T/denylist.
-  3. Check: python3 $C/test_tactician.py
+Installed. Next: run  claude /tactician-setup  (it interviews you into $T: config, context map, access map, denylist).
 MSG

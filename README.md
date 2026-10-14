@@ -28,7 +28,8 @@ git clone https://github.com/attadevelops/tactician ~/Programs/tactician && ~/Pr
 
 `install.sh` links the `tactician` command, the review skill and the SwiftBar plugin, turns on the pre-push guard, makes
 the recording shortcut (see Recording) and creates the tenant folder with a starter config; it never overwrites a
-tenant's files. Each Mac moves itself to the
+tenant's files. Then run `claude /tactician-setup`: it interviews you into the tenant folder (config, context map, the
+access map of your work channels, denylist). Each Mac moves itself to the
 newest release tag every 6 hours (and from the menu's Check for Updates), never during a call and never over local
 changes. To change Tactician from any Mac: the menu's Improve Tactician... opens a Claude session in the checkout, which
 files an issue or opens a pull request (`CLAUDE.md` has the rules).
@@ -46,6 +47,7 @@ on machines for different companies and no company's data reaches another or the
 | `meetings/<project>/` | archived wrap-ups and action packets of live calls |
 | `evals/meeting-<id>.toml` | expectations for a recorded meeting, written by the review |
 | `docs/` | graded call write-ups |
+| `access.md` | the access map: each work channel (chat workspace, mail account), how it is read on this Mac, what the company allows (read, react, draft), when it was verified |
 | `NOTES.md` | this company's post-call steps and constraints, read by the review skill |
 
 With an empty tenant folder Tactician still runs: a generic prompt, no brief, projects given as paths.
