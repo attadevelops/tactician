@@ -107,7 +107,7 @@ tenant's post-call steps.
   it answers; importance; repeats) against the cited sources as they stood at the call, marks recall of the eval file's
   expectations by meaning, and writes `<run>.judge.json`.
 - `python3 evals/score.py <log> --eval FILE`: the older regex scorer.
-- Replays are pinned: a run saves the digest and brief it saw, and a replay of its log loads that snapshot, so it cannot
+- Replays are pinned: a run saves the digest and brief it saw, and a replay of its log loads that snapshot (and the run's participants, unless `--with` overrides them), so it cannot
   know how the call ended. Agent-session updates replay on the transcript's own clock. Documents the session opens with
   its tools are today's versions.
 - The rule for a prompt change: one judged replay per change (two when the judge and you disagree); keep it only if

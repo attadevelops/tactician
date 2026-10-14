@@ -182,10 +182,10 @@ print("brief ok")
 
 # replay source: a past run's log (indented transcript lines only; colour codes, notes and status lines dropped)
 (tmp / "tactician-proj-20261008-094811.md").write_text(
-    "# tactician-proj-20261008-094811\nproject: /x\nstarted: 2026-10-08T09:48:11\n\n\x1b[2m09:48:11 Call date\x1b[0m\n"
+    "# tactician-proj-20261008-094811\nproject: /x\nstarted: 2026-10-08T09:48:11\n\n\x1b[2m09:48:11 Call date 2026-10-08. Participants: Sam (PM), Pat (dev). Use their names instead of speaker labels.\x1b[0m\n"
     "\x1b[2m  [09:47:13] Others: hello there\x1b[0m\n09:53:15 NOTE\nNOTE: not transcript\n\n  [09:47:18] You: hi\n")
 m = la.load_log(tmp / "tactician-proj-20261008-094811.md")
-assert m["id"] == "20261008-094811" and m["start_time"] == "2026-10-08 09:48", m
+assert m["id"] == "20261008-094811" and m["start_time"] == "2026-10-08 09:48" and m["participants"] == "Sam (PM), Pat (dev)", m
 assert [r["text"] for r in la.parse_transcript(m["raw_transcript"])] == ["hello there", "hi"]
 assert la.last_wrapup(tmp / "proj", before="2026-10-07") == "old" and la.last_wrapup(tmp / "proj", before="2026-10-01") == ""
 assert la.local_time("2026-10-08T13:47:13Z").startswith("2026-10-08 ") and la.local_time("2026-10-08 09:48") == "2026-10-08 09:48"

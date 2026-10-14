@@ -337,8 +337,9 @@ def load_log(path):
     if not lines:
         sys.exit(f"no transcript lines in {path}")
     started = re.search(r"^started: (\d{4}-\d\d-\d\d)T(\d\d:\d\d)", text, re.M)
+    who = re.search(r"Call date [\d-]+\. Participants: (.*?)\. Use their names", text)  # who that run was told was on the call
     return {"id": "-".join(Path(path).stem.split("-")[-2:]), "start_time": f"{started[1]} {started[2]}" if started else "",
-            "raw_transcript": "\n".join(lines)}
+            "raw_transcript": "\n".join(lines), "participants": who[1] if who else None}
 
 
 def tail_replay(rows, speed):
@@ -842,6 +843,7 @@ def main():
         if not pinned:
             print(c("33", f"{now()} no context snapshot for {a.replay}: this replay reads today's digest and brief, which may know the outcome"))
         start = local_time(m["start_time"])
+        a.participants = a.participants or m.get("participants")  # a log replay keeps its run's participants unless --with
     else:  # ponytail: no calendar signal to pick the project, so say it loudly; Ctrl-C before the end archives nothing
         print(c("1", f"{now()} Tactician for {project.name}. Not this meeting's project? Ctrl-C and run: tactician <project>"))
         m, start = None, datetime.now().strftime("%Y-%m-%d %H:%M")  # warm-up: the board comes up now, Muesli's start replaces this
