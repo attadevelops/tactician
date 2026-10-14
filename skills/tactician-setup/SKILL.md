@@ -79,7 +79,10 @@ user's explicit yes per channel.
 - `python3 <checkout>/test_tactician.py` passes, and `tactician --shell-config` prints this tenant.
 - Each channel marked readable: read the newest few messages once by the stated method, without opening unread
   conversations where avoidable, and record the result in its `verified` line. A method that fails stays "not yet".
-- The menu bar shows the default project; the recording shortcut exists.
+  Measure read state: the unread count before and after. In a background tab, `get_page_text` and `innerText` can come
+  back empty: read list rows with `textContent`, and note the working selector in the `read` line.
+- The menu bar shows the default project; the recording shortcut exists. When `participants` changed, remove
+  `logs/menubar.participants` (the menu bar's last typed names, which override the config default).
 
 ## Close
 
