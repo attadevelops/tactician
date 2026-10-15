@@ -96,6 +96,7 @@ TOOLS = ["Read", "Grep", "Glob", "Skill", "Bash", "WebSearch", "WebFetch"]
 
 CONTEXT_DIR = HOME / "contexts"
 MEETINGS_DIR = HOME / "meetings"  # archived wrap-ups, one file per live meeting
+DIGESTS_DIR = HOME / "digests"  # the channel readers' rolling digests, one per channel (skills/tactician-read), newest first
 
 
 def load_context(project):
@@ -119,6 +120,8 @@ def load_context(project):
                     brief += f"\n--- {p.name} ---\n" + "\n".join(lines) + "\n"
             else:
                 text += line + "\n"
+    for p in sorted(DIGESTS_DIR.glob("*.md")):  # ponytail: every channel in every brief; per-engagement filter if a Mac has several
+        brief += f"\n--- {p.name} ---\n" + "\n".join(p.read_text().splitlines()[:120]) + "\n"
     return text.strip(), dirs, brief.strip()
 
 

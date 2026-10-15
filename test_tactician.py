@@ -159,6 +159,9 @@ la.CONTEXT_DIR = tmp / "contexts"; la.CONTEXT_DIR.mkdir()
 (tmp / "p1" / "notes.md").write_text("l1\nl2\nl3\n")
 (la.CONTEXT_DIR / "proj.md").write_text(f"add-dir: {tmp}/p1\nbrief: {{project}}/../p1/notes.md:2\nbrief: {tmp}/missing.md\nmap text\n")
 assert la.load_context(tmp / "proj") == ("map text", [str(tmp / "p1")], "--- notes.md ---\nl1\nl2"), la.load_context(tmp / "proj")
+la.DIGESTS_DIR = tmp / "digests"; la.DIGESTS_DIR.mkdir(); (la.DIGESTS_DIR / "chat.md").write_text("new ask\n" * 130)
+assert la.load_context(tmp / "proj")[2].endswith("--- chat.md ---\n" + "new ask\n" * 119 + "new ask")  # newest 120 lines
+(la.DIGESTS_DIR / "chat.md").unlink()
 (tmp / "p1" / "CLAUDE.md").write_text("digest\n")
 assert la.claude_md([str(tmp / "p1"), str(tmp / "proj")]) == f"--- {tmp}/p1/CLAUDE.md ---\ndigest", la.claude_md([str(tmp / "p1")])
 la.MEETINGS_DIR = tmp / "meetings"; assert la.last_wrapup(tmp / "proj") == ""

@@ -16,7 +16,7 @@ touch "$T/denylist" "$T/blocked-roots"                       # terms and private
 
 mkdir -p "$HOME/.local/bin" "$HOME/.claude/skills"
 ln -sfn "$C/tactician.py" "$HOME/.local/bin/tactician"
-for s in tactician-review tactician-setup; do ln -sfn "$C/skills/$s" "$HOME/.claude/skills/$s"; done
+for s in tactician-review tactician-setup tactician-read; do ln -sfn "$C/skills/$s" "$HOME/.claude/skills/$s"; done
 P=$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)
 if [ -n "$P" ]; then
   printf '#!/bin/bash\n# <bitbar.title>Tactician</bitbar.title>\n# The plugin lives in the tactician checkout; this file only runs it.\nexec "%s/menubar/tactician.5s.sh"\n' "$C" > "$P/tactician.5s.sh"

@@ -49,6 +49,7 @@ on machines for different companies and no company's data reaches another or the
 | `docs/` | graded call write-ups |
 | `access.md` | the access map: each work channel (chat workspace, mail account), how it is read on this Mac, what the company allows (read, react, draft), when it was verified |
 | `NOTES.md` | this company's post-call steps and constraints, read by the review skill |
+| `digests/<channel>.md`, `inbox.jsonl` | what the channel reader (`/loop 20m /tactician-read` in a visible session) found: a rolling digest per channel, loaded into every brief, and the direct asks of you |
 
 With an empty tenant folder Tactician still runs: a generic prompt, no brief, projects given as paths.
 
