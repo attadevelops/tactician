@@ -24,7 +24,24 @@ Find everything the Mac can tell you, then ask only for the rest. Useful signals
 - Prerequisites: Muesli installed, `claude` signed in, `gh auth status` on the personal account, SwiftBar, the
   recording shortcut (`shortcuts list`).
 
+- An assistant system already running here (the user's own notes vault, digest or chat-watcher): folders with a
+  CLAUDE.md or memory files outside the project roots, `~/Library/LaunchAgents` and `crontab -l` entries that run
+  `claude` or scripts, skills under `~/.claude/skills` that read chat or mail. Ask the user where theirs lives.
+
 Report what you found in one short block, then interview.
+
+## Reconcile an existing system
+
+Tactician joins what already works on this Mac; it never replaces it. When discovery finds one:
+- Inventory each part: what it reads, what it writes and where, its schedule, and whether it works (its logs show
+  recent good runs; the user says what they rely on).
+- Map each part to Tactician: its knowledge store becomes the engagement digest (an `add-dir:` or `brief:` line, the
+  files stay where they are); its chat or mail reader becomes that channel's reader (record it in `access.md` as the
+  `read` method; never add a second reader of the same channel); its write rules become that channel's `allowed`.
+- Never move, delete, disable or rewrite its files, jobs or data. A change to it needs the user's yes, one at a time.
+- Write the map in `NOTES.md` under "Existing system": each part, its Tactician role, and what stays its own.
+- What it does that Tactician lacks, or does better: file an issue per behaviour (generic words) so it reaches every
+  Mac through a release, then switch this Mac over only after the release matches it.
 
 ## Interview
 
