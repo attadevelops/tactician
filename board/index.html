@@ -702,7 +702,7 @@
     const off = !linkUp || Date.now() - lastAt > SILENCE_MS;
     if (askingAt && Date.now() - askingAt > ASK_MS) askingAt = 0;
     const failed = !!askFailAt && Date.now() - askFailAt < 5000;
-    const deaf = { waiting: 'not recording', stalled: 'no transcript', ended: 'call ended' }[rec];
+    const deaf = { waiting: 'not recording', stalled: 'no transcript', ended: 'call ended', done: 'finished' }[rec];
     statusEl.textContent = off ? 'no signal' : failed ? 'not sent' : askingAt ? 'asking' : deaf || 'listening';
     stateEl.classList.toggle('off', off || failed || rec === 'waiting' || rec === 'stalled');
     stateEl.classList.toggle('ask', !off && !failed && !!askingAt);
@@ -762,10 +762,12 @@
     waiting: ['Not recording. ', "Muesli isn't transcribing this call, so Tactician can't hear it."],
     stalled: ['No transcript for a minute. ', 'Muesli is recording but nothing is arriving: check Muesli.'],
     ended: ['Recording ended. ', 'Tactician is writing the wrap-up.'],
+    done: ['Tactician has finished. ', 'The wrap-up is saved. You can close this window.'],
   };
   function setRec(e) {
     rec = e.state;
-    const t = REC[rec];
+    const t = rec === 'done' && !e.saved ? ['Tactician has stopped. ', 'You can close this window.'] : REC[rec];
+    if (rec === 'done') { endBtn.disabled = false; endBtn.textContent = 'Close window'; endBtn.classList.remove('armed'); }
     recEl.hidden = !t;
     if (t) {
       recEl.classList.toggle('soft', rec !== 'waiting');
@@ -790,6 +792,7 @@
   const endBtn = $('#end');
   let endArmed = 0;
   endBtn.addEventListener('click', () => {
+    if (rec === 'done') { window.close(); return; }
     if (Date.now() - endArmed > 4000) {
       endArmed = Date.now();
       endBtn.textContent = 'End Tactician? Click again';
@@ -801,7 +804,10 @@
     endBtn.textContent = 'Ending…';
     fetch('/stop', { method: 'POST', body: JSON.stringify({ token: TOKEN }) })
       .then((r) => { if (!r.ok) throw new Error(r.status); endBtn.textContent = 'Ended, close this window'; window.close(); })
-      .catch(() => { endBtn.disabled = false; endBtn.textContent = 'End failed: use Stop in the menu bar'; });
+      .catch(() => {   // no server: either the run already finished (close the window) or it is stuck (the menu bar's Stop)
+        endBtn.disabled = false;
+        endBtn.textContent = !linkUp ? 'Tactician has stopped: close this window' : 'End failed: use Stop in the menu bar';
+      });
   });
 
   form.addEventListener('submit', (e) => { e.preventDefault(); sendAsk(); });

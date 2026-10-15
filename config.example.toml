@@ -20,3 +20,7 @@ browser_profile = "Default"
 
 # The macOS shortcut that runs Muesli's "Start Meeting Recording" action with its Title set to the Shortcut Input.
 shortcut = "Tactician Start Meeting"
+# The shortcut that runs Muesli's "Stop Meeting Recording", run when the call app lets go of the microphone.
+stop_shortcut = "Tactician Stop Meeting"
+# Window titles of a call (a regex); the matching window is the one whose picture reaches the model.
+# call_windows = "^Meet - |Zoom Meeting|Microsoft Teams|Huddle|Webex"

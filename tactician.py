@@ -52,15 +52,19 @@ _NOISE = ("<command-", "<local-command", "<system-reminder", "<task-notification
           "This session is being continued", "Caveat:")
 # The user's macOS shortcut running Muesli's "Start Meeting Recording" App Intent, its Title set to the Shortcut Input.
 SHORTCUT = os.environ.get("TACTICIAN_SHORTCUT") or CONFIG.get("shortcut") or "Tactician Start Meeting"
+STOP_SHORTCUT = CONFIG.get("stop_shortcut") or "Tactician Stop Meeting"  # Muesli's Stop Meeting Recording, run when the call ends
+CALL_GONE_S = 45  # the call app has let go of the microphone this long: the call is over
+SCREEN_S = 30  # how often the meeting window is looked at; an image goes to the session only when it changed
+CALL_WINDOW = re.compile(CONFIG.get("call_windows") or r"^Meet - |Zoom Meeting|Microsoft Teams|Huddle|Webex")  # window titles of a call
 _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
 PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
 
-Each user message is a new slice of the live speech-to-text transcript, lines like "[HH:MM:SS] Speaker: text". "You" is {user}. The live transcript labels everyone else "Others" (speaker names only arrive after the call), so name a person only when the content makes it certain (whoever runs the call and hands out action items; the front-end developer answering front-end questions); otherwise say "the room". Expect garbled words, missing punctuation and phonetic spellings of project terms. A message starting with "[CONTEXT]" names the call date and the participants. "[BACKLOG]" is transcript from before you attached: read it and reply "..." unless something is urgent. "[USER]" is {user} asking you directly, typed, or by clicking a board item ("About s3 ..."): always answer, as a say item, with what the board did not already say; when they state a fact instead of asking, it is settled like an [UPDATE]: change the board, no say item. "[UPDATE]" is what {user} and their own agent sessions (the coding assistants working in their project folders) said since your last look, newest last; it is newer than the brief and the digest. A decision, approval or status in it is settled: retire the agenda and say items it settles, never raise them again, and use its facts from then on. The brief's "recent agent sessions" block is the same record from before the call. A "[BOARD]" line at the end of a slice lists what is on their board right now, with ids; "raised" are agenda items already done, which stay on their board struck through. "[WRONG]" is {user} marking a board item wrong or useless; it is already gone from their board: never repeat that point or any fact in it. "[MEETING ENDED]" asks for the wrap-up.
+Each user message is a new slice of the live speech-to-text transcript, lines like "[HH:MM:SS] Speaker: text". "You" is {user}. The live transcript labels everyone else "Others" (speaker names only arrive after the call), so name a person only when the content makes it certain (whoever runs the call and hands out action items; the front-end developer answering front-end questions); otherwise say "the room". Expect garbled words, missing punctuation and phonetic spellings of project terms. A message starting with "[CONTEXT]" names the call date and the participants. "[BACKLOG]" is transcript from before you attached: read it and reply "..." unless something is urgent. "[USER]" is {user} asking you directly, typed, or by clicking a board item ("About s3 ..."): always answer, as a say item, with what the board did not already say; when they state a fact instead of asking, it is settled like an [UPDATE]: change the board, no say item. "[UPDATE]" is what {user} and their own agent sessions (the coding assistants working in their project folders) said since your last look, newest last; it is newer than the brief and the digest. A decision, approval or status in it is settled: retire the agenda and say items it settles, never raise them again, and use its facts from then on. The brief's "recent agent sessions" block is the same record from before the call. A "[BOARD]" line at the end of a slice lists what is on their board right now, with ids; "raised" are agenda items already done, which stay on their board struck through. "[WRONG]" is {user} marking a board item wrong or useless; it is already gone from their board: never repeat that point or any fact in it. "[SCREEN]" comes with an image of the meeting window: what someone is sharing (slides, a document, a page, a mockup). Use what it shows as you use the transcript; a say item that rests on it has "screen" as its source. When the room points at something on screen ("as you can see", "this page", "here") and you have no image of it yet, add "look": true to your reply and the next slice brings one. "[MEETING ENDED]" asks for the wrap-up.
 
 Reply to each slice with exactly "..." (three dots, nothing else) or with one JSON object, no prose before or after it and no code fences:
 {"say": [{"lines": ["...", "..."], "importance": 3, "source": "contract.md, Scope"}], "agenda": [{"id": "a1", "text": "...", "rank": 1}], "commit": [{"id": "c1", "text": "..."}], "done": ["s2", "a3"]}
-Every key is optional. "say" adds items to the Say pane: 1 to 3 lines, at most 12 words a line, words {user} can read aloud; the source goes in "source" (file and section, or "digest", "brief", "memory", "web"), never in the lines. Register: the lines are words {user} will say, so fit them to whoever they answer. By default the listener is not technical (the client, the project manager, an executive): plain words about what users will see, dates, effort, cost and decisions. Keep every number that matters, in plain units ("about four cents a question, under the five-cent target"); drop only the labels the listener would not know (ticket or question ids, codes, field, file or service names, metric names like p50); when the exact term matters, add it once in brackets after the plain words ("answers in about five seconds (p50 4.6 s)"). Go technical only when a developer or DevOps person asked, or the line answers one: the participants and the people in the digest say who is who, and in the live transcript technical vocabulary in the question is the tell. An executive gets the outcome first, in one line. When unsure who is asking, stay plain. Agenda text and "source" are for {user}'s eyes and can stay terse. importance 3: {user} just said, or is about to say, something wrong, or is about to commit to a date or a number that conflicts with what they promised or with the SOW; nothing else is a 3. The first line starts with "WRONG:" or "CAREFUL:" and the next line gives the words to say instead. importance 2: a fact that changes what they say next (the answer to a question asked of them, a status, a number, a decision already made). importance 1: useful background. "agenda" adds or re-ranks Agenda items (ids a1, a2, ...; reuse an id to re-rank; text at most 10 words). "commit" records every commitment {user} makes on this call, firm or loose ("I'll send it Friday", "I'm looking into it"), as the transcript shows them saying it; never one from the brief, the digest or an earlier call: ids c1, c2, ..., at most 10 words, with the date when one was said; reuse an id to correct one. Commitments stay on their board for a read-back before the call ends. "done" retires items by id once {user} has said them, the question is answered, or the topic has moved on. Retire instead of re-posting, and never add an item that is already on the board; an item that makes an open item's point from another angle is a repeat, so do not post it. State a commitment once, with the date the brief records, and never restate it with another date.
+Every key is optional. "say" adds items to the Say pane: 1 to 3 lines, at most 12 words a line, words {user} can read aloud; the source goes in "source" (file and section, or "digest", "brief", "memory", "web"), never in the lines. Register: the lines are words {user} will say, so fit them to whoever they answer. By default the listener is not technical (the client, the project manager, an executive): plain words about what users will see, dates, effort, cost and decisions. Keep every number that matters, in plain units ("about four cents a question, under the five-cent target"); drop only the labels the listener would not know (ticket or question ids, codes, field, file or service names, metric names like p50); when the exact term matters, add it once in brackets after the plain words ("answers in about five seconds (p50 4.6 s)"). Go technical only when a developer or DevOps person asked, or the line answers one: the participants and the people in the digest say who is who, and in the live transcript technical vocabulary in the question is the tell. An executive gets the outcome first, in one line. When unsure who is asking, stay plain. Agenda text and "source" are for {user}'s eyes and can stay terse. importance 3: {user} just said, or is about to say, something wrong, or is about to commit to a date or a number that conflicts with what they promised or with the SOW; nothing else is a 3. The first line starts with "WRONG:" or "CAREFUL:" and the next line gives the words to say instead. importance 2: a fact that changes what they say next (the answer to a question asked of them, a status, a number, a decision already made). importance 1: useful background. "agenda" adds or re-ranks Agenda items (ids a1, a2, ...; reuse an id to re-rank; text at most 10 words). "commit" records every commitment {user} makes on this call, firm or loose ("I'll send it Friday", "I'm looking into it"), as the transcript shows them saying it; never one from the brief, the digest or an earlier call: ids c1, c2, ..., at most 10 words, with the date when one was said; reuse an id to correct one. Commitments stay on their board for a read-back before the call ends. "done" retires items by id once {user} has said them, the question is answered, or the topic has moved on. "Not known yet" is an answer: when the room says it will be settled later ("we'll know tomorrow", "TBD", "I'll find out"), retire every item that asks it, keep that date, and never ask it again on this call. Retire instead of re-posting, and never add an item that is already on the board; an item that makes an open item's point from another angle is a repeat, so do not post it. State a commitment once, with the date the brief records, and never restate it with another date.
 
 Speak only when the project context has something the room does not: a fact, a correction, a number, a date, a decision already made, or the exact words that put {user}'s work in its true and best light (when something is nearly done, the words are "built and tested, two checks left", not the list of what is missing). When {user} says done, built or finished, check the plan's open items for that feature and give them the honest one-liner. Silence without checking is only for small talk, scheduling and logistics; for any claim or question about scope, status, dates, numbers or design, look first, then speak or stay silent. Check every plan, sprint, deadline or "next week" against the dates in your context (the SOW end, holidays, last call's commitments). Say a boundary at most twice a call: once when it first matters and once as a last-chance reminder before the call ends; in between, raise it only when {user} agrees to something that lands past it, at importance 3. Someone else naming a date past it is not a reason to repeat it. When {user} states a commitment that differs from what they promised last call, say so at importance 3. When the conversation moves to another lane (the context names them), re-rank the agenda so that lane's open items are on top and retire what has been raised. Never guess or fabricate; when the context does not settle it, stay silent unless {user} asked, then say "Not in project docs".
 
@@ -225,11 +229,45 @@ def poll(mid, after_id):
     return [dict(r) for r in rows], (st["meeting_status"] if st else "missing")
 
 
-def has_shortcut():
+def has_shortcut(name=None):
     try:
-        return SHORTCUT in subprocess.run(["shortcuts", "list"], capture_output=True, text=True, timeout=15).stdout.splitlines()
+        return (name or SHORTCUT) in subprocess.run(["shortcuts", "list"], capture_output=True, text=True, timeout=15).stdout.splitlines()
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def stop_recording():
+    """End Muesli's recording through the stop shortcut (Muesli's Stop Meeting Recording); True when it ran."""
+    try:
+        return subprocess.run(["shortcuts", "run", STOP_SHORTCUT], capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def mic_users():
+    """Bundle ids (or "pid N") of the processes with the microphone open, from CoreAudio, Muesli's own call signal.
+    A call app (browser, Zoom, Teams) keeps it open while muted, and lets go when the call ends."""
+    import ctypes, ctypes.util
+    ca = ctypes.CDLL(ctypes.util.find_library("CoreAudio"))
+    cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+    cf.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+
+    class Addr(ctypes.Structure):
+        _fields_ = [("sel", ctypes.c_uint32), ("scope", ctypes.c_uint32), ("elem", ctypes.c_uint32)]
+
+    def prop(obj, sel, size):
+        a = Addr(int.from_bytes(sel.encode(), "big"), int.from_bytes(b"glob", "big"), 0)
+        n, buf = ctypes.c_uint32(size), ctypes.create_string_buffer(size)
+        return buf.raw[:n.value] if ca.AudioObjectGetPropertyData(obj, ctypes.byref(a), 0, None, ctypes.byref(n), buf) == 0 else b""
+
+    out, raw = [], prop(1, "prs#", 4 * 1024)  # every process CoreAudio knows
+    for obj in (int.from_bytes(raw[i:i + 4], "little") for i in range(0, len(raw), 4)):
+        if prop(obj, "piri", 4) != b"\x01\x00\x00\x00":  # is running input
+            continue
+        ref, name = int.from_bytes(prop(obj, "pbid", 8) or bytes(8), "little"), ctypes.create_string_buffer(256)
+        ok = ref and cf.CFStringGetCString(ref, name, 256, 0x08000100) and name.value
+        out.append(name.value.decode() if ok else f"pid {int.from_bytes(prop(obj, 'ppid', 4) or bytes(4), 'little')}")
+    return out
 
 
 def start_recording(title):
@@ -244,18 +282,24 @@ def start_recording(title):
 
 
 def make_shortcut():
-    """Write the shortcut (Muesli's Start Meeting Recording, Title = Shortcut Input), sign it and open the import."""
-    if has_shortcut():
-        print(f"The '{SHORTCUT}' shortcut exists.")
-        return 0
-    import plistlib
+    """Write the two shortcuts (Muesli's Start Meeting Recording with Title = Shortcut Input, and Stop Meeting Recording),
+    sign them and open the imports."""
     title = {"Value": {"string": "￼", "attachmentsByRange": {"{0, 1}": {"Type": "ExtensionInput"}}},
              "WFSerializationType": "WFTextTokenString"}
-    action = {"WFWorkflowActionIdentifier": "com.muesli.app.StartMeetingIntent",
-              "WFWorkflowActionParameters": {
-                  "AppIntentDescriptor": {"AppIntentIdentifier": "StartMeetingIntent", "BundleIdentifier": "com.muesli.app",
-                                          "Name": "Muesli", "TeamIdentifier": "58W55QJ567"},
-                  "meetingTitle": title}}
+    for name, intent, params in ((SHORTCUT, "StartMeetingIntent", {"meetingTitle": title}), (STOP_SHORTCUT, "StopMeetingIntent", {})):
+        if has_shortcut(name):
+            print(f"The '{name}' shortcut exists.")
+            continue
+        action = {"WFWorkflowActionIdentifier": f"com.muesli.app.{intent}",
+                  "WFWorkflowActionParameters": {
+                      "AppIntentDescriptor": {"AppIntentIdentifier": intent, "BundleIdentifier": "com.muesli.app",
+                                              "Name": "Muesli", "TeamIdentifier": "58W55QJ567"}, **params}}
+        write_shortcut(name, action)
+    return 0
+
+
+def write_shortcut(name, action):
+    import plistlib
     shortcut = {"WFWorkflowActions": [action], "WFWorkflowClientVersion": "3000",
                 "WFWorkflowMinimumClientVersion": 900, "WFWorkflowMinimumClientVersionString": "900",
                 "WFWorkflowIcon": {"WFWorkflowIconGlyphNumber": 59511, "WFWorkflowIconStartColor": 4282601983},
@@ -264,12 +308,64 @@ def make_shortcut():
                 "WFWorkflowOutputContentItemClasses": [], "WFWorkflowImportQuestions": [], "WFWorkflowTypes": [],
                 "WFQuickActionSurfaces": []}
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    raw, signed = LOG_DIR / ".shortcut.plist", LOG_DIR / f"{SHORTCUT}.shortcut"
+    raw, signed = LOG_DIR / ".unsigned.shortcut", LOG_DIR / f"{name}.shortcut"  # sign reads only a .shortcut name
     raw.write_bytes(plistlib.dumps(shortcut, fmt=plistlib.FMT_BINARY))
     subprocess.run(["shortcuts", "sign", "--mode", "anyone", "-i", str(raw), "-o", str(signed)], check=True)
     subprocess.run(["open", str(signed)], check=True)
-    print("In Shortcuts: Add Shortcut. On its first run (Tactician's first start) choose Always Allow, so it can pass the title to Muesli.")
-    return 0
+    print(f"In Shortcuts: Add Shortcut ('{name}'). On its first run choose Always Allow, so it can reach Muesli.")
+
+
+def call_window():
+    """(window id, title) of the on-screen meeting window, from CoreGraphics' window list; (None, reason) when there is none.
+    Titles are hidden without Screen Recording permission, so no titles at all means no permission."""
+    import ctypes, ctypes.util
+    V = ctypes.c_void_p
+    cg, cf = ctypes.CDLL(ctypes.util.find_library("CoreGraphics")), ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+    cg.CGWindowListCopyWindowInfo.restype, cg.CGWindowListCopyWindowInfo.argtypes = V, [ctypes.c_uint32, ctypes.c_uint32]
+    cf.CFArrayGetCount.restype, cf.CFArrayGetCount.argtypes = ctypes.c_long, [V]
+    cf.CFArrayGetValueAtIndex.restype, cf.CFArrayGetValueAtIndex.argtypes = V, [V, ctypes.c_long]
+    cf.CFDictionaryGetValue.restype, cf.CFDictionaryGetValue.argtypes = V, [V, V]
+    cf.CFStringCreateWithCString.restype, cf.CFStringCreateWithCString.argtypes = V, [V, ctypes.c_char_p, ctypes.c_uint32]
+    cf.CFStringGetCString.argtypes = [V, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+    cf.CFNumberGetValue.argtypes, cf.CFRelease.argtypes = [V, ctypes.c_int, V], [V]
+    key = lambda k: cf.CFStringCreateWithCString(None, k.encode(), 0x08000100)
+    k_num, k_owner, k_name = key("kCGWindowNumber"), key("kCGWindowOwnerName"), key("kCGWindowName")
+
+    def text(ref, b=ctypes.create_string_buffer(512)):
+        return b.value.decode() if ref and cf.CFStringGetCString(ref, b, 512, 0x08000100) else ""
+
+    arr, titled = cg.CGWindowListCopyWindowInfo(1 | 16, 0), False  # on screen, no desktop elements; front to back
+    try:
+        for i in range(cf.CFArrayGetCount(arr)):
+            d = cf.CFArrayGetValueAtIndex(arr, i)
+            owner, title = text(cf.CFDictionaryGetValue(d, k_owner)), text(cf.CFDictionaryGetValue(d, k_name))
+            titled |= bool(title) and owner not in ("Window Server", "Control Center", "Dock")
+            if title and CALL_WINDOW.search(title):
+                n = ctypes.c_int64()
+                cf.CFNumberGetValue(cf.CFDictionaryGetValue(d, k_num), 4, ctypes.byref(n))
+                return n.value, title
+    finally:
+        cf.CFRelease(arr)
+    return None, "no meeting window on screen" if titled else "no Screen Recording permission"
+
+
+def capture_window(wid, path):
+    """The window as a JPEG at most 1568 px on its long side (the size the model reads best); a tiny bitmap of it, the
+    fingerprint for 'did it change'. None when the capture failed."""
+    small = path.with_suffix(".bmp")
+    try:
+        if subprocess.run(["screencapture", "-x", "-o", "-l", str(wid), "-t", "jpg", str(path)], capture_output=True, timeout=15).returncode:
+            return None
+        subprocess.run(["sips", "-Z", "1568", str(path)], capture_output=True, timeout=15)
+        subprocess.run(["sips", "-z", "18", "32", "-s", "format", "bmp", str(path), "--out", str(small)], capture_output=True, timeout=15)
+        return small.read_bytes()[-18 * 32 * 3:]  # ponytail: raw tail of the bitmap is its pixels, enough to compare
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def changed(a, b, threshold=8):
+    """Mean per-byte difference of two fingerprints above threshold: the shared screen moved on (a new slide, a scroll)."""
+    return a is None or b is None or len(a) != len(b) or sum(abs(x - y) for x, y in zip(a, b)) / len(a) > threshold
 
 
 def wait_for_recording(report):
@@ -507,6 +603,7 @@ class Session:
         self.show_transcript = show_transcript
         self.archive, self.header, self.ended, self.wrapup = None, "", False, ""  # wrap-up archive: main() sets it once a live call records
         self.stop_asked = False  # End on the board
+        self.screen, self.look = None, False  # (title, jpeg) for the next slice; the model asked for a fresh look
         self.rec = {"state": "waiting", "since": now(), "can_start": False}  # Muesli: waiting, recording, stalled or ended
         self.post = []  # plain-text replies after [MEETING ENDED]: the wrap-up, then the packets
         self.session_id = None
@@ -630,6 +727,8 @@ class Session:
                 self.items[cid] = {"id": cid, "pane": "commit", "text": text, "born": old.get("born", time.time())}
                 self.event("commit", self.items[cid])
                 self.out(c("2", f"{now()}   commit: {cid} {text}"))
+        if obj.get("look"):  # the model wants to see what the room is pointing at: the next slice brings a fresh image
+            self.look = True
         done = [i for i in (obj.get("done") or []) if self.retire(str(i), "done")]
         if done:
             self.out(c("2", f"{now()}   done: " + ", ".join(done)))
@@ -709,8 +808,10 @@ class Session:
                 + (f"; commitments: {', '.join(cm)}" if cm else "")) if say or ag or cm else ""
 
     # --- input
-    def send(self, text, label=None, priority=None):
-        msg = {"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": text}}
+    def send(self, text, label=None, priority=None, image=None):
+        content = text if not image else [{"type": "text", "text": text}, {"type": "image", "source": {
+            "type": "base64", "media_type": "image/jpeg", "data": __import__("base64").b64encode(image).decode()}}]
+        msg = {"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": content}}
         if priority:  # "later" = hold until the current turn ends; default injects at the next tool boundary
             msg["priority"] = priority
         with self.lock:
@@ -740,7 +841,10 @@ class Session:
         self.expire()
         with self.cond:
             tail, self.pending = self.pending + [self.board_line()], []
-        return self.send(text + "".join("\n" + t for t in tail if t))
+            screen, self.screen = self.screen, None
+        if screen:
+            tail.append(f"[SCREEN] The meeting window ({screen[0]}) at {now()}, attached.")
+        return self.send(text + "".join("\n" + t for t in tail if t), image=screen and screen[1])
 
     def _ask_after(self, msg, label, n, timeout):
         """Send a post-meeting request (held until the current turn ends) and wait for its plain-text reply, the n-th."""
@@ -767,12 +871,14 @@ class Session:
         except (subprocess.TimeoutExpired, OSError):
             self.p.terminate()
         self.stderr.close()
-        self.items_log.close()
         if self.wrapup and self.archive:
             self.archive.parent.mkdir(parents=True, exist_ok=True)
             self.archive.write_text(f"{self.header}\n\n{self.wrapup}\n")
             self.out(c("2", f"{now()} wrap-up archived: {self.archive}"))
         self.out(c("2", f"{now()} done: {self.turns} turns, est. ${self.cost:.3f}; resume with: cd {self.cwd} && claude --resume {self.session_id}"))
+        self.set_rec("done", saved=bool(self.wrapup and self.archive))  # the board's last word: it says so and End just closes it
+        self.items_log.close()
+        time.sleep(1.5)  # ponytail: time for the event stream to deliver it before the process (and its server) exits
 
 
 def typed_input(session):
@@ -905,7 +1011,35 @@ def main():
         clock = (lambda rows: time.time()) if not a.replay else (lambda rows: datetime.strptime(
             f"{day} {rows[-1]['timestamp_label']}", "%Y-%m-%d %H:%M:%S").timestamp() if rows else last_upd)
         last_upd = time.time() if not a.replay else datetime.strptime(start, "%Y-%m-%d %H:%M").timestamp()
+        call_at = None  # live runs: the last time a call app (not Muesli) had the microphone
+        looked, seen, why_not = 0, None, ""  # the meeting window: last look, fingerprint of the last image sent, why none
+        shots = LOG_DIR / f"{name}.screens"  # every image the session saw, kept with the run's log
         for rows in feed:
+            if not a.replay and (session.look or time.time() - looked > SCREEN_S):
+                looked, session.look = time.time(), False
+                wid, title = call_window()
+                if wid:
+                    shots.mkdir(exist_ok=True)
+                    f = shots / f"{datetime.now():%H%M%S}.jpg"
+                    fp = capture_window(wid, f)
+                    if fp and changed(fp, seen):
+                        seen = fp
+                        with session.cond:
+                            session.screen = (title, f.read_bytes())
+                        session.out(c("2", f"{now()} screen: {title} ({f.name})"))
+                    else:
+                        f.unlink(missing_ok=True)
+                elif title != why_not and title != "no meeting window on screen":
+                    session.out(c("33", f"{now()} screen: {title} (System Settings, Privacy, Screen Recording: allow the app that starts Tactician)"))
+                why_not = title if not wid else ""
+            if not a.replay and call_at is not False:
+                if [u for u in mic_users() if not u.startswith("com.muesli")]:
+                    call_at = time.time()
+                elif call_at and time.time() - call_at > CALL_GONE_S:
+                    call_at = False  # once: the recording ends, the feed with it, and the wrap-up follows
+                    ok = stop_recording()
+                    session.out(c("2" if ok else "33", f"{now()} the call app let go of the microphone: " + (
+                        "asked Muesli to stop recording" if ok else f"stop the recording in Muesli (no '{STOP_SHORTCUT}' shortcut: tactician --make-shortcut)")))
             t = clock(rows)
             if t - last_upd > UPDATE_S:
                 upd, last_upd = agent_activity(session.dirs, last_upd, until=t), t

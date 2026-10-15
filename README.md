@@ -81,6 +81,17 @@ sent no transcript for a minute; a question asked meanwhile is answered knowing 
 Start Tactician a few minutes early: the session and board come up at launch, the opening agenda is ready in seconds and
 questions work. The log's `meeting:` line is written when the recording starts; Ctrl-C before that archives nothing.
 
+The call ends itself: once a call app (the browser for Meet, Zoom, Teams) has held the microphone and then let go of it for
+45 seconds, Tactician runs `Tactician Stop Meeting` (Muesli's "Stop Meeting Recording", also made by `--make-shortcut`),
+and Muesli's end of the recording starts the wrap-up as before. A call held in the room, with no call app, never trips it.
+When the wrap-up is saved the board says so, and End just closes the window.
+
+The meeting window is looked at every 30 seconds (and whenever the model asks): when a window titled like a call
+(`Meet - `, `Zoom Meeting`, `Microsoft Teams`, or the config's `call_windows` pattern) is on screen and its picture changed,
+the next transcript slice carries the image, so shared slides and documents reach the model. Only that window is captured,
+never the rest of the screen; the images are kept in `logs/<run>.screens/`. It needs Screen Recording permission for the
+app that starts Tactician (SwiftBar from the menu bar): without it the log says so once and the call runs on audio alone.
+
 ## What Tactician knows
 
 - The project folder you name, plus the context map's `add-dir:` folders, read-only (Read, Grep, Glob, a graphify

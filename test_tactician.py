@@ -38,7 +38,7 @@ import threading
 def fake(ended=False):
     s = la.Session.__new__(la.Session); s.log = FakeOut(); s.ended = ended; s.wrapup = ""
     s.items, s.n_say, s.n_agenda, s.n_commit, s.events, s.items_log, s.cond = {}, 0, 0, 0, [], FakeOut(), threading.Condition()
-    s.pending = []
+    s.pending, s.screen, s.look = [], None, False
     s.rec, s.title = {"state": "recording", "since": "", "can_start": False}, "proj call"
     return s
 s = fake()
@@ -70,7 +70,7 @@ assert (s.items["a3"]["rank"], s.items["a1"]["rank"]) == (1, 2) and [e["id"] for
 s._note('{"agenda": [{"id": "a2", "rank": 1}]}')
 assert "done" not in s.items["a2"] and [s.items[i]["rank"] for i in ("a2", "a3", "a1")] == [1, 2, 3], s.items
 # The user's direct questions: typed in the console, or typed or clicked on the board
-sent = []; s.send = lambda text, label=None, priority=None: sent.append((text, label)) or True
+sent = []; s.send = lambda text, label=None, priority=None, image=None: sent.append((text, label) + ((image,) if image else ())) or True
 assert s.ask("  is it   in the SOW? ") and sent[-1] == ("[USER] is it in the SOW?", "you asked: is it in the SOW?"), sent
 assert s.ask("", "s3", "Quick Search\n backend built") and sent[-1][0] == '[USER] About s3 "Quick Search backend built": more detail, the facts behind it'
 assert not s.ask("   ") and len(sent) == 2
@@ -94,6 +94,11 @@ assert s.pending.pop() == f'[WRONG] Alex marked s{s.n_say} wrong: "Cost is 4 cen
 s.show_transcript = False
 assert s.send_transcript([{"timestamp_label": "10:00:00", "speaker": "You", "text": "hi"}])
 assert sent[-1][0].startswith(f'[10:00:00] You: hi\n[WRONG] Alex marked {sid} wrong: "Pat gets it Friday"\n[BOARD] ') and s.pending == [], sent[-1]
+s._note('{"look": true}'); assert s.look  # the model asks to see the screen
+s.screen = ("Meet - abc", b"jpg"); s.send_transcript([{"timestamp_label": "10:00:01", "speaker": "Others", "text": "as you can see"}])
+assert "[SCREEN] The meeting window (Meet - abc)" in sent[-1][0] and sent[-1][2] == b"jpg" and s.screen is None, sent[-1]
+assert la.changed(None, b"a") and not la.changed(bytes(30), bytes(30)) and la.changed(bytes(30), bytes([200]) * 30)
+assert la.CALL_WINDOW.search("Meet - abc-defg-hij") and not la.CALL_WINDOW.search("Google Meet notes - Docs")
 print("board ok")
 
 # the page server: a snapshot of open items, then the live stream
