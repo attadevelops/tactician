@@ -145,3 +145,18 @@ project; Stop Now is Ctrl-C with no wrap-up. Last Wrap-up and Review Last Call (
 - Cost levers are lean context and a 5 s poll, never a cheaper model or a classifier in front of it.
 - Quality gate: the LLM judge on replays; prompt rules are principles, project facts live in the digest.
 - Post-call: action packets per lane; agents triage and propose, and implement only on your go.
+
+## Licence and terms
+
+MIT (see `LICENSE`). No warranty: Tactician's lines are suggestions from a language model and can be wrong; you decide
+what you say on a call.
+
+- **Claude.** Tactician runs the unmodified `claude` command you installed and signed in to yourself, so usage counts
+  against your own Claude plan and follows Anthropic's terms
+  (<https://code.claude.com/docs/en/legal-and-compliance>). It never reads, stores or passes on your Claude credentials.
+  Plan limits assume ordinary individual use; a long call is one long session.
+- **Recording consent.** Muesli records and transcribes the call. Recording or transcribing a conversation may need the
+  consent of everyone on it where you are, and your employer or client may forbid it; that is yours to check.
+- **Company data.** Transcripts, wrap-ups and the context it reads stay on your Mac, apart from what the Claude session
+  sends to Anthropic to answer. Use it only on machines and data where your company allows that.
+- Not affiliated with or endorsed by Anthropic or Muesli.
