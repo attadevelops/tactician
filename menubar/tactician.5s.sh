@@ -26,7 +26,7 @@ if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
   echo "$state | size=13"
   echo "Project: $proj | size=12"
   echo "Open Board | $RUN param1=board sfimage=rectangle.split.2x1"
-  echo "Stop Now (no wrap-up) | $RUN param1=stop sfimage=stop.circle"
+  echo "Stop and Wrap Up | $RUN param1=stop sfimage=stop.circle"
 else
   echo " | templateImage=$(logo '#000')"
   echo "---"
