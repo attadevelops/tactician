@@ -106,6 +106,10 @@ app that starts Tactician (SwiftBar from the menu bar): without it the log says 
   `~/.claude/projects`, tool traffic left out).
 - During the call, new lines from those sessions every 2 minutes (`[UPDATE]`), so decisions made elsewhere stop
   showing up as open items.
+- During the call, lines new in the `brief:` files every 2 minutes (`[UPDATE]`), so a source of truth that refreshes
+  itself (a second brain's status snapshot) reaches a call already under way.
+- The config's `lookup` command, when set: a read-only command over your source of truth (a second brain), which the
+  session runs mid-call for current status, deployments and who is waiting. Only that one command is allowed.
 
 The session runs lean: its working directory is an empty folder under `/private/tmp/tactician/`, so the project's own
 CLAUDE.md, rules, hooks and skills are not auto-loaded (tens of thousands of tokens a turn that no note used).
