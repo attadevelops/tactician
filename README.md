@@ -142,13 +142,20 @@ the Tactician logo (`logo.svg`): the menu bar's own colour when off, orange whil
 a yellow triangle on a problem. Start <default> Call, Start Call In (each project root, general or one of its folders,
 listed live) and Start With Names... run Tactician in the background (console: `~/.tactician/logs/menubar.out`) and open the
 board; every start passes the last names given (the config's `participants` at first). While it runs the menu shows the
-project; Stop Now is Ctrl-C with no wrap-up. Last Wrap-up and Review Last Call (a cmux workspace running
+project; Stop and Wrap Up is End on the board: it writes the wrap-up and ends the Muesli recording if Tactician
+started it, so the next call gets a recording of its own. A Start that joins a recording already running skips its
+transcript older than two minutes (an earlier call). Last Wrap-up and Review Last Call (a cmux workspace running
 `/tactician-review`) follow.
 
 ## Design decisions
 
 - Capture is a tail of Muesli's database (5-15 s lag), never a second recorder.
-- Silent by default: a line appears only when the project context has something the room does not.
+- Silent by default: a line appears only when the project context has something the room does not. The exception is
+  listening: while someone else presents, at most two sharp questions per topic and plain explanations of jargon, from
+  general knowledge and labelled so.
+- Audio guard: a "You" line that repeats the room (the mic hearing the speakers) is dropped, and when only the mic
+  track arrives for three minutes the board and the model are told who they can no longer tell apart.
+- At most three say items per reply; answers to the user's own questions stay up fifteen minutes, the rest four.
 - Output is a board of say-lines and an agenda, not explanatory notes.
 - Cost levers are lean context and a 5 s poll, never a cheaper model or a classifier in front of it.
 - Quality gate: the LLM judge on replays; prompt rules are principles, project facts live in the digest.

@@ -99,7 +99,44 @@ s.screen = ("Meet - abc", b"jpg"); s.send_transcript([{"timestamp_label": "10:00
 assert "[SCREEN] The meeting window (Meet - abc)" in sent[-1][0] and sent[-1][2] == b"jpg" and s.screen is None, sent[-1]
 assert la.changed(None, b"a") and not la.changed(bytes(30), bytes(30)) and la.changed(bytes(30), bytes([200]) * 30)
 assert la.CALL_WINDOW.search("Meet - abc-defg-hij") and not la.CALL_WINDOW.search("Google Meet notes - Docs")
+# pacing: three say items a reply, loudest first; an answer to the user's question stays up longer than a note
+s = fake()
+s._note('{"say": [' + ", ".join(f'{{"lines": ["note {i}"], "importance": {1 + (i == 4)}}}' for i in range(5)) + "]}")
+assert [i["lines"][0] for i in s.items.values() if i["pane"] == "say"] == ["note 4", "note 0", "note 1"], s.items
+s.answering = True
+s._note('{"say": [{"lines": ["the answer"], "importance": 2}]}'); ans = f"s{s.n_say}"
+s._note('{"say": [{"lines": ["a note"], "importance": 2}]}'); note = f"s{s.n_say}"
+assert s.items[ans].get("answer") and not s.items[note].get("answer") and not s.answering
+s.items[ans]["born"] -= 300; s.items[note]["born"] -= 300; s.expire()
+assert ans in s.items and note not in s.items
+s.items[ans]["born"] -= 700; s.expire(); assert ans not in s.items
 print("board ok")
+
+# audio: the mic hearing the speakers is dropped, the user's own words are kept, a dead Others track is noticed
+row = lambda t, who, text: {"timestamp_label": t, "speaker": who, "text": text}
+e = la.Echo()
+kept = e.keep([row("08:31:29", "Others", "Yeah, guys, so as per yesterday's call we had hiccups."),
+               row("08:32:00", "You", "Yeah, guys, so--"), row("08:32:05", "You", "As per yesterday's call, we..."),
+               row("08:32:09", "You", "One of the solutions we discussed was the cache."), row("08:32:10", "You", "Okay.")])
+assert [r["text"] for r in kept] == ["Yeah, guys, so as per yesterday's call we had hiccups.",
+                                     "One of the solutions we discussed was the cache.", "Okay."], kept
+assert e.keep([row("08:35:00", "You", "As per yesterday's call, we...")]), "an Others line over 90 s back is no longer an echo source"
+t = la.Tracks()
+assert t.check([row("09:00:00", "Others", "here is the architecture"), row("09:02:00", "You", "what about tenants")]) is None
+assert t.check([row("09:03:01", "You", "so the data flows into the store")]) == "lost" and t.lost
+assert t.check([row("09:04:00", "Others", "Bye.")]) is None and t.lost  # a lone word does not bring it back
+assert t.check([row("09:05:00", "Others", "can everyone see my screen")]) == "back" and not t.lost
+# a run joining a recording in progress skips the earlier call's transcript on its first poll
+polls = iter([([row("08:31:00", "You", "old call")] * 5 + [row("09:02:30", "Others", "new call starts"), row("09:02:31", "You", "hello")] * 3, "recording"),
+              ([row("08:40:00", "You", "late row, kept")], "ended")])
+def numbered(batch):
+    rows, st = batch
+    return [{**r, "id": n} for n, r in enumerate(rows, 1)], st
+real_poll, la.poll = la.poll, lambda mid, after: numbered(next(polls))
+got = [b for b in la.tail_live(63, lambda *_: None, skip_before="09:02:00")]
+la.poll = real_poll
+assert [r["text"] for r in got[0]] == ["new call starts", "hello"] * 3 and got[0][0].get("backlog") and got[1][0]["text"] == "late row, kept", got
+print("audio ok")
 
 # the page server: a snapshot of open items, then the live stream
 import urllib.request
