@@ -1,6 +1,6 @@
 #!/bin/bash
-# Install Tactician on this Mac from this checkout. Safe to run again (it never overwrites a tenant's files).
-#   git clone https://github.com/attadevelops/tactician ~/Programs/tactician && ~/Programs/tactician/install.sh
+# The plumbing of an install, run by the setup skill (claude /tactician-setup in the checkout), which checks and fixes
+# the prerequisites around it. Safe to run again (it never overwrites a tenant's files).
 set -e
 C="$(cd "$(dirname "$0")" && pwd)"
 T="${TACTICIAN_HOME:-$HOME/.tactician}"

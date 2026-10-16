@@ -5,6 +5,7 @@ contexts/
 docs/
 *.toml
 !config.example.toml
-# session handoffs: local to each machine
-.claude/
+# session handoffs: local to each machine; the setup skill is shared so a fresh clone can run /tactician-setup
+.claude/*
+!.claude/skills/
 __pycache__/

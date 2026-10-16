@@ -23,13 +23,17 @@ python3 test_tactician.py               # self-check, no meeting or Claude neede
 ## Install, updates and contributing
 
 ```
-git clone https://github.com/attadevelops/tactician ~/Programs/tactician && ~/Programs/tactician/install.sh
+git clone https://github.com/attadevelops/tactician ~/Programs/tactician && cd ~/Programs/tactician && claude /tactician-setup
 ```
 
-`install.sh` links the `tactician` command, the review skill and the SwiftBar plugin, turns on the pre-push guard, makes
-the recording shortcut (see Recording) and creates the tenant folder with a starter config; it never overwrites a
-tenant's files. Then run `claude /tactician-setup`: it interviews you into the tenant folder (config, context map, the
-access map of your work channels, denylist). Each Mac moves itself to the
+The setup skill does the install as a Claude session, not a fixed script: it checks every prerequisite and fixes what
+is missing (Python 3.11+, Muesli, SwiftBar and its plugin folder, both recording shortcuts, Screen Recording for
+SwiftBar, the menu bar icon clear of the notch), runs `install.sh` for the plumbing (it links the `tactician` command,
+the skills and the SwiftBar plugin, turns on the pre-push guard, writes the shortcut files and creates the tenant folder
+with a starter config; it never overwrites a tenant's files), finds and reconciles an assistant system already on the
+Mac, interviews you into the tenant folder (config, context map, the access map of your work channels, denylist), and
+ends with tests and a short replay. You do the clicks only a person can (Add Shortcut, a System Settings switch). Run it
+again any time to check or repair a Mac. Each Mac moves itself to the
 newest release tag every 6 hours (and from the menu's Check for Updates), never during a call and never over local
 changes. To change Tactician from any Mac: the menu's Improve Tactician... opens a Claude session in the checkout, which
 files an issue or opens a pull request (`CLAUDE.md` has the rules).

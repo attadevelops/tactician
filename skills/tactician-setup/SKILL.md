@@ -1,15 +1,41 @@
 ---
 name: tactician-setup
-description: Set up Tactician on a new Mac, or extend this Mac's setup - interviews the user into the tenant folder (who they are, engagements, key people, managers, project folders) and writes the access map of every work channel (team chat, email, meetings) with how it is read and what is allowed. Use right after install.sh, when the user says "set up tactician", "onboard this Mac", "add an engagement", "add a channel", "update the access map", or when Tactician runs with an empty tenant.
+description: Install and set up Tactician on a new Mac, or extend or repair this Mac's setup - makes every prerequisite true (SwiftBar, both recording shortcuts, permissions), interviews the user into the tenant folder (who they are, engagements, key people, managers, project folders), writes the access map of every work channel, and proves the whole thing works. Use right after cloning the repo, when the user says "install tactician", "set up tactician", "onboard this Mac", "check my setup", "add an engagement", "add a channel", "update the access map", or when Tactician runs with an empty tenant.
 ---
 
 # Tactician setup
 
-Goal: one session takes this Mac from `install.sh` to a tenant Tactician can use on the next call, and an access map
-that the channel readers and the work agent can rely on. The user is a consultant; this Mac works for one company.
+Goal: one session takes this Mac from a fresh clone to a tenant Tactician can use on the next call, proven by tests,
+and an access map that the channel readers and the work agent can rely on. The user is a consultant; this Mac works for
+one company.
 
-Code: the tactician checkout this skill is linked from (`README.md`, "Tenant folder", and `config.example.toml` define
-the formats). Data: the tenant folder `~/.tactician` (or `$TACTICIAN_HOME`). Safe to run again: it extends what is there.
+Code: the tactician checkout this skill is loaded from (`README.md`, "Tenant folder", and `config.example.toml` define
+the formats). Data: the tenant folder `~/.tactician` (or `$TACTICIAN_HOME`). Safe to run again: it checks every item,
+fixes only what is not true, and extends the tenant rather than replacing it.
+
+## The Mac is ready when all of these hold
+
+Check each one first, fix what fails, then check it again; finish with this list ticked in your report. Install with
+Homebrew when it is there (and ask before installing Homebrew itself). The user does what only a person can (a click in
+Shortcuts or System Settings, a sign-in): open the exact window for them, say the one click, then verify it yourself.
+A company-managed Mac may block an install: then say what is blocked and carry on with the rest.
+- `python3` is 3.11 or newer; Muesli is in `/Applications`; `claude` is signed in.
+- SwiftBar is installed, has a plugin folder (`defaults read com.ameba.SwiftBar PluginDirectory`; when unset, write
+  `~/.config/swiftbar-plugins` there before SwiftBar's first launch), and is running.
+- `install.sh` from the checkout has run (it links the command, the skills and the menu bar plugin, makes the tenant
+  folder, and writes both shortcut files). It is plumbing and safe to re-run.
+- Both shortcuts are in `shortcuts list` (the config's `shortcut` and `stop_shortcut`, default "Tactician Start Meeting"
+  and "Tactician Stop Meeting"). `install.sh` opens Shortcuts on each signed file: the user clicks Add Shortcut. Run the
+  stop shortcut once (harmless when nothing records) so its Always Allow prompt for Muesli is answered now, not mid-call.
+  Never run the start shortcut in a test: it starts a real recording.
+- SwiftBar has Screen Recording (it reads call window titles): open
+  `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`, the user turns SwiftBar on.
+- The Tactician icon is visible in the menu bar, not hidden under the notch: when it is missing, set
+  `"NSStatusItem Preferred Position tactician.5s.sh"` in SwiftBar's defaults low enough to land left of the notch,
+  restart SwiftBar, and ask the user to confirm they see it.
+- The menu lists the right folders: after the tenant is written, run the plugin
+  (`<checkout>/menubar/tactician.5s.sh`) and confirm its output names every project folder the user takes calls in,
+  including the folders an existing assistant system keeps (they become `project_roots`).
 
 ## Discover before asking
 
@@ -21,8 +47,6 @@ Find everything the Mac can tell you, then ask only for the rest. Useful signals
 - Channels: chat and mail apps in `/Applications` (Slack, Microsoft Teams, Outlook, Mail), Chrome profiles
   (`~/Library/Application Support/Google/Chrome/Local State`, `profile.info_cache`: profile directory, name, account),
   a Chrome listening for CDP (`lsof -nP -iTCP -sTCP:LISTEN | grep -i chrome`) and its `--user-data-dir`, mail accounts.
-- Prerequisites: Muesli installed, `claude` signed in, `gh auth status` on the personal account, SwiftBar, the
-  recording shortcut (`shortcuts list`).
 
 - An assistant system already running here (the user's own notes vault, digest or chat-watcher): folders with a
   CLAUDE.md or memory files outside the project roots, `~/Library/LaunchAgents` and `crontab -l` entries that run
@@ -98,8 +122,11 @@ user's explicit yes per channel.
   conversations where avoidable, and record the result in its `verified` line. A method that fails stays "not yet".
   Measure read state: the unread count before and after. In a background tab, `get_page_text` and `innerText` can come
   back empty: read list rows with `textContent`, and note the working selector in the `read` line.
-- The menu bar shows the default project; the recording shortcut exists. When `participants` changed, remove
-  `logs/menubar.participants` (the menu bar's last typed names, which override the config default).
+- Every item under "The Mac is ready when" holds. When `participants` changed, remove `logs/menubar.participants`
+  (the menu bar's last typed names, which override the config default).
+- End to end: when Muesli has a finished meeting, replay a few minutes of it in the background
+  (`tactician <project> --replay <id> --from <hh:mm:ss> --to <hh:mm:ss> --speed 20`) and confirm the log shows the
+  session answering and board items appearing; then close the board.
 
 ## Close
 
