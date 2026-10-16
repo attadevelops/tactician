@@ -766,11 +766,13 @@
   };
   function setRec(e) {
     rec = e.state;
-    const t = rec === 'done' && !e.saved ? ['Tactician has stopped. ', 'You can close this window.'] : REC[rec];
+    const t = rec === 'done' && !e.saved ? ['Tactician has stopped. ', 'You can close this window.']
+      : rec === 'recording' && e.one_track ? ['Only your mic is heard. ', "Since " + (e.track_at || '') + " the others' audio isn't being transcribed, so Tactician can't tell who is talking. Check Muesli."]
+      : REC[rec];
     if (rec === 'done') { endBtn.disabled = false; endBtn.textContent = 'Close window'; endBtn.classList.remove('armed'); }
     recEl.hidden = !t;
     if (t) {
-      recEl.classList.toggle('soft', rec !== 'waiting');
+      recEl.classList.toggle('soft', rec !== 'waiting' && !(rec === 'recording' && e.one_track));
       $('#rechead').textContent = t[0];
       $('#rectext').textContent = t[1];
       recBtn.hidden = !(rec === 'waiting' && e.can_start);

@@ -26,7 +26,7 @@ case "$1" in
     echo $! > "$PID"
     for _ in $(seq 40); do board_url > /dev/null && break; sleep 0.25; done
     open_board ;;
-  stop) running && kill -INT "$(cat "$PID")" ;;  # Ctrl-C: no wrap-up; a call that ends in Muesli wraps up by itself
+  stop) running && kill -TERM "$(cat "$PID")" ;;  # as End on the board: wraps up the call and ends a recording Tactician started
   board) open_board ;;
   wrapup)
     f=$(ls -t "$TACTICIAN_HOME"/meetings/*/*.md 2>/dev/null | grep -v -- '-packet-' | head -1)
