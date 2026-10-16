@@ -167,6 +167,17 @@ assert la.load_context(tmp / "proj") == ("map text", [str(tmp / "p1")], "--- not
 la.DIGESTS_DIR = tmp / "digests"; la.DIGESTS_DIR.mkdir(); (la.DIGESTS_DIR / "chat.md").write_text("new ask\n" * 130)
 assert la.load_context(tmp / "proj")[2].endswith("--- chat.md ---\n" + "new ask\n" * 119 + "new ask")  # newest 120 lines
 (la.DIGESTS_DIR / "chat.md").unlink()
+seen, files = {}, la.brief_files(tmp / "proj")
+assert [(p.resolve(), n) for p, n in files] == [((tmp / "p1" / "notes.md").resolve(), 2), ((tmp / "missing.md").resolve(), None)], files
+assert la.brief_news(seen, files) == ""  # the first look only records what the call started with
+(tmp / "p1" / "notes.md").write_text("l1\nl1b\nl2\n")
+assert la.brief_news(seen, files) == "--- notes.md ---\nl1b" and la.brief_news(seen, files) == ""  # within the line limit
+(tmp / "missing.md").write_text("born mid-call\n"); assert la.brief_news(seen, files) == "--- missing.md ---\nborn mid-call"
+la.LOOKUP = ""; assert la.lookup_prompt() == (None, "")
+la.LOOKUP = str(tmp / "p1" / "notes.md"); assert la.lookup_prompt() == (None, "")  # not executable
+os.chmod(la.LOOKUP, 0o755); allow, text = la.lookup_prompt()
+assert allow == f"Bash({la.LOOKUP}:*)" and text.startswith("[LOOKUP]"), (allow, text)
+la.LOOKUP = ""
 (tmp / "p1" / "CLAUDE.md").write_text("digest\n")
 assert la.claude_md([str(tmp / "p1"), str(tmp / "proj")]) == f"--- {tmp}/p1/CLAUDE.md ---\ndigest", la.claude_md([str(tmp / "p1")])
 la.MEETINGS_DIR = tmp / "meetings"; assert la.last_wrapup(tmp / "proj") == ""

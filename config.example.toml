@@ -24,3 +24,6 @@ shortcut = "Tactician Start Meeting"
 stop_shortcut = "Tactician Stop Meeting"
 # Window titles of a call (a regex); the matching window is the one whose picture reaches the model.
 # call_windows = "^Meet - |Zoom Meeting|Microsoft Teams|Huddle|Webex"
+# A read-only command over your source of truth (e.g. a second brain's CLI wrapper that only allows read subcommands).
+# The call session may run it mid-call for current status, deployments and who is waiting; it is never given write access.
+# lookup = "~/notes/brain/read-only-cli"
