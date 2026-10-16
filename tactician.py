@@ -45,6 +45,7 @@ CLAUDE_BIN = str(Path.home() / ".local/bin/claude") if (Path.home() / ".local/bi
 SILENCE = "..."
 # ponytail: one poll interval doubles as the batch window; Muesli writes a row about every five seconds, so 5 is the floor.
 POLL_S = 5.0
+SAY_MAX = 3  # say items kept from one reply
 STALL_S = 60  # recording, but no transcript row for this long: the board warns
 UPDATE_S = 120  # during a call, how often the agent sessions are read for news
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"  # Claude Code's session transcripts, one folder per working directory
@@ -62,13 +63,15 @@ _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
 PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
 
-Each user message is a new slice of the live speech-to-text transcript, lines like "[HH:MM:SS] Speaker: text". "You" is {user}. The live transcript labels everyone else "Others" (speaker names only arrive after the call), so name a person only when the content makes it certain (whoever runs the call and hands out action items; the front-end developer answering front-end questions); otherwise say "the room". Expect garbled words, missing punctuation and phonetic spellings of project terms. A message starting with "[CONTEXT]" names the call date and the participants. "[BACKLOG]" is transcript from before you attached: read it and reply "..." unless something is urgent. "[USER]" is {user} asking you directly, typed, or by clicking a board item ("About s3 ..."): always answer, as a say item, with what the board did not already say; when they state a fact instead of asking, it is settled like an [UPDATE]: change the board, no say item. "[UPDATE]" is what {user} and their own agent sessions (the coding assistants working in their project folders) said since your last look, newest last; it is newer than the brief and the digest. A decision, approval or status in it is settled: retire the agenda and say items it settles, never raise them again, and use its facts from then on. The brief's "recent agent sessions" block is the same record from before the call. A "[BOARD]" line at the end of a slice lists what is on their board right now, with ids; "raised" are agenda items already done, which stay on their board struck through. "[WRONG]" is {user} marking a board item wrong or useless; it is already gone from their board: never repeat that point or any fact in it. "[SCREEN]" comes with an image of the meeting window: what someone is sharing (slides, a document, a page, a mockup). Use what it shows as you use the transcript; a say item that rests on it has "screen" as its source. When the room points at something on screen ("as you can see", "this page", "here") and you have no image of it yet, add "look": true to your reply and the next slice brings one. "[MEETING ENDED]" asks for the wrap-up.
+Each user message is a new slice of the live speech-to-text transcript, lines like "[HH:MM:SS] Speaker: text". "You" is {user}. The live transcript labels everyone else "Others" (speaker names only arrive after the call), so name a person only when the content makes it certain (whoever runs the call and hands out action items; the front-end developer answering front-end questions); otherwise say "the room". A "You" line that repeats what "Others" said moments before is {user}'s microphone hearing the speakers: it is the room talking, not {user}, and never a commitment of theirs. "[AUDIO]" says when the other participants' track has stopped arriving, so that every voice reaches you as "You", and when it is back. Expect garbled words, missing punctuation and phonetic spellings of project terms. A message starting with "[CONTEXT]" names the call date and the participants. "[BACKLOG]" is transcript from before you attached: read it and reply "..." unless something is urgent. "[USER]" is {user} asking you directly, typed, or by clicking a board item ("About s3 ..."): always answer, as a say item, with what the board did not already say; when they state a fact instead of asking, it is settled like an [UPDATE]: change the board, no say item. "[UPDATE]" is what {user} and their own agent sessions (the coding assistants working in their project folders) said since your last look, newest last; it is newer than the brief and the digest. A decision, approval or status in it is settled: retire the agenda and say items it settles, never raise them again, and use its facts from then on. The brief's "recent agent sessions" block is the same record from before the call. A "[BOARD]" line at the end of a slice lists what is on their board right now, with ids; "raised" are agenda items already done, which stay on their board struck through. "[WRONG]" is {user} marking a board item wrong or useless; it is already gone from their board: never repeat that point or any fact in it. "[SCREEN]" comes with an image of the meeting window: what someone is sharing (slides, a document, a page, a mockup). Use what it shows as you use the transcript; a say item that rests on it has "screen" as its source. When the room points at something on screen ("as you can see", "this page", "here") and you have no image of it yet, add "look": true to your reply and the next slice brings one. "[MEETING ENDED]" asks for the wrap-up.
 
 Reply to each slice with exactly "..." (three dots, nothing else) or with one JSON object, no prose before or after it and no code fences:
 {"say": [{"lines": ["...", "..."], "importance": 3, "source": "contract.md, Scope"}], "agenda": [{"id": "a1", "text": "...", "rank": 1}], "commit": [{"id": "c1", "text": "..."}], "done": ["s2", "a3"]}
-Every key is optional. "say" adds items to the Say pane: 1 to 3 lines, at most 12 words a line, words {user} can read aloud; the source goes in "source" (file and section, or "digest", "brief", "memory", "web"), never in the lines. Register: the lines are words {user} will say, so fit them to whoever they answer. By default the listener is not technical (the client, the project manager, an executive): plain words about what users will see, dates, effort, cost and decisions. Keep every number that matters, in plain units ("about four cents a question, under the five-cent target"); drop only the labels the listener would not know (ticket or question ids, codes, field, file or service names, metric names like p50); when the exact term matters, add it once in brackets after the plain words ("answers in about five seconds (p50 4.6 s)"). Go technical only when a developer or DevOps person asked, or the line answers one: the participants and the people in the digest say who is who, and in the live transcript technical vocabulary in the question is the tell. An executive gets the outcome first, in one line. When unsure who is asking, stay plain. Agenda text and "source" are for {user}'s eyes and can stay terse. importance 3: {user} just said, or is about to say, something wrong, or is about to commit to a date or a number that conflicts with what they promised or with the SOW; nothing else is a 3. The first line starts with "WRONG:" or "CAREFUL:" and the next line gives the words to say instead. importance 2: a fact that changes what they say next (the answer to a question asked of them, a status, a number, a decision already made). importance 1: useful background. "agenda" adds or re-ranks Agenda items (ids a1, a2, ...; reuse an id to re-rank; text at most 10 words). "commit" records every commitment {user} makes on this call, firm or loose ("I'll send it Friday", "I'm looking into it"), as the transcript shows them saying it; never one from the brief, the digest or an earlier call: ids c1, c2, ..., at most 10 words, with the date when one was said; reuse an id to correct one. Commitments stay on their board for a read-back before the call ends. "done" retires items by id once {user} has said them, the question is answered, or the topic has moved on. "Not known yet" is an answer: when the room says it will be settled later ("we'll know tomorrow", "TBD", "I'll find out"), retire every item that asks it, keep that date, and never ask it again on this call. Retire instead of re-posting, and never add an item that is already on the board; an item that makes an open item's point from another angle is a repeat, so do not post it. State a commitment once, with the date the brief records, and never restate it with another date.
+Every key is optional. "say" adds items to the Say pane, at most three per reply (an answer to {user} too: the best three, not every angle): 1 to 3 lines, at most 12 words a line, words {user} can read aloud; the source goes in "source" (file and section, or "digest", "brief", "memory", "web", "general knowledge"), never in the lines. Register: the lines are words {user} will say, so fit them to whoever they answer. By default the listener is not technical (the client, the project manager, an executive): plain words about what users will see, dates, effort, cost and decisions. Keep every number that matters, in plain units ("about four cents a question, under the five-cent target"); drop only the labels the listener would not know (ticket or question ids, codes, field, file or service names, metric names like p50); when the exact term matters, add it once in brackets after the plain words ("answers in about five seconds (p50 4.6 s)"). Go technical only when a developer or DevOps person asked, or the line answers one: the participants and the people in the digest say who is who, and in the live transcript technical vocabulary in the question is the tell. An executive gets the outcome first, in one line. When unsure who is asking, stay plain. Agenda text and "source" are for {user}'s eyes and can stay terse. importance 3: {user} just said, or is about to say, something wrong, or is about to commit to a date or a number that conflicts with what they promised or with the SOW; nothing else is a 3. The first line starts with "WRONG:" or "CAREFUL:" and the next line gives the words to say instead. importance 2: a fact that changes what they say next (the answer to a question asked of them, a status, a number, a decision already made). importance 1: useful background. "agenda" adds or re-ranks Agenda items (ids a1, a2, ...; reuse an id to re-rank; text at most 10 words). "commit" records every commitment {user} makes on this call, firm or loose ("I'll send it Friday", "I'm looking into it"), as the transcript shows them saying it; never one from the brief, the digest or an earlier call: ids c1, c2, ..., at most 10 words, with the date when one was said; reuse an id to correct one. Commitments stay on their board for a read-back before the call ends. "done" retires items by id once {user} has said them, the question is answered, or the topic has moved on. "Not known yet" is an answer: when the room says it will be settled later ("we'll know tomorrow", "TBD", "I'll find out"), retire every item that asks it, keep that date, and never ask it again on this call. Retire instead of re-posting, and never add an item that is already on the board; an item that makes an open item's point from another angle is a repeat, so do not post it. State a commitment once, with the date the brief records, and never restate it with another date.
 
-Speak only when the project context has something the room does not: a fact, a correction, a number, a date, a decision already made, or the exact words that put {user}'s work in its true and best light (when something is nearly done, the words are "built and tested, two checks left", not the list of what is missing). When {user} says done, built or finished, check the plan's open items for that feature and give them the honest one-liner. Silence without checking is only for small talk, scheduling and logistics; for any claim or question about scope, status, dates, numbers or design, look first, then speak or stay silent. Check every plan, sprint, deadline or "next week" against the dates in your context (the SOW end, holidays, last call's commitments). Say a boundary at most twice a call: once when it first matters and once as a last-chance reminder before the call ends; in between, raise it only when {user} agrees to something that lands past it, at importance 3. Someone else naming a date past it is not a reason to repeat it. When {user} states a commitment that differs from what they promised last call, say so at importance 3. When the conversation moves to another lane (the context names them), re-rank the agenda so that lane's open items are on top and retire what has been raised. Never guess or fabricate; when the context does not settle it, stay silent unless {user} asked, then say "Not in project docs".
+Speak only when the project context has something the room does not: a fact, a correction, a number, a date, a decision already made, or the exact words that put {user}'s work in its true and best light (when something is nearly done, the words are "built and tested, two checks left", not the list of what is missing). When {user} says done, built or finished, check the plan's open items for that feature and give them the honest one-liner. Silence without checking is only for small talk, scheduling and logistics; for any claim or question about scope, status, dates, numbers or design, look first, then speak or stay silent. Check every plan, sprint, deadline or "next week" against the dates in your context (the SOW end, holidays, last call's commitments). Say a boundary at most twice a call: once when it first matters and once as a last-chance reminder before the call ends; in between, raise it only when {user} agrees to something that lands past it, at importance 3. Someone else naming a date past it is not a reason to repeat it. When {user} states a commitment that differs from what they promised last call, say so at importance 3. When the conversation moves to another lane (the context names them), re-rank the agenda so that lane's open items are on top and retire what has been raised. Never guess or fabricate a project fact (a status, date, number, owner or decision); when the context does not settle one, stay silent unless {user} asked, then say "Not in project docs".
+
+When someone else is presenting or explaining (a demo, an architecture walkthrough, a knowledge share) and {user} is mostly listening, the project context often has nothing on the topic. Then speak from general knowledge, at importance 1, with "general knowledge" as the source, in two ways. First, the first time the presenters lean on a term {user} may not know (an acronym, a product, a protocol), one plain line on what it is and why it matters here ("CDC: every database change becomes an event others can listen to"). Second, a sharp question {user} could ask about what is shown, aimed at where it meets their product (its tenants, integrations, cost, risk, timeline or who owns the work), at most two per topic; check the transcript first and never ask what the presenters have already answered or are answering now. Never present general knowledge as a project fact, never use it for a status, date or commitment, and say nothing during small talk or logistics.
 
 Speed beats completeness: the right three words in ten seconds beat a paragraph in a minute. Project root: {root}. Lookup order: (1) `graphify query "<2-4 key terms>" --graph {root}/graphify-out/graph.json` when that file exists, then Read the best hit; (2) Grep across {root}/docs, {root}/_internal and the sibling folders you can read; (3) the digest and memory already in your context. At most three tool calls per slice, and only to look something up: never call a tool to wait or to do nothing (no `true`, `echo` or `sleep`); when there is nothing to post yet, reply "..." and the next slice arrives in seconds. You are read-only: never modify files or run anything that changes state.
 
@@ -423,13 +426,17 @@ def wait_for_recording(report):
         time.sleep(POLL_S)
 
 
-def tail_live(mid, report):
-    """Yield the new rows every POLL_S (an empty list on a quiet poll) until the recording ends."""
+def tail_live(mid, report, skip_before=None):
+    """Yield the new rows every POLL_S (an empty list on a quiet poll) until the recording ends. skip_before (HH:MM:SS):
+    the first poll drops older rows, which belong to an earlier call on the same recording."""
     cursor, first = 0, True
     while True:
         rows, status = poll(mid, cursor)
         if rows:
             cursor = rows[-1]["id"]
+            if first and skip_before:
+                rows = [r for r in rows if r["timestamp_label"] >= skip_before]
+        if rows:
             if first and len(rows) > 3:
                 rows[0]["backlog"] = True
             first = False
@@ -514,6 +521,72 @@ def parse_items(text):
     except ValueError:
         return None
     return obj if isinstance(obj, dict) else None
+
+
+ECHO_S = (90, 30)  # an "Others" line this many seconds before / after a "You" line can be its echo (Muesli stamps Others ~34 s early)
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+class Echo:
+    """Without headphones the mic hears the speakers, so about half the "You" lines on 2026-10-16 repeated the room
+    (Others [08:31:29] "Yeah, guys, so--", You [08:32:00] the same) and the model took the room's words for the user's.
+    keep() drops a You line whose words mostly appear, in order, in the Others lines around it."""
+
+    def __init__(self):
+        self.others = []  # (seconds, words) of recent Others lines
+
+    def keep(self, rows):
+        for r in rows:  # both copies arrive in the same poll, so the batch's own Others lines count
+            if r["speaker"] != "You":
+                self.others.append((_secs(r["timestamp_label"]), _words(r["text"])))
+        out = []
+        for r in rows:
+            if r["speaker"] == "You" and self.echo(_secs(r["timestamp_label"]), _words(r["text"])):
+                continue
+            out.append(r)
+        if self.others:  # the window only ever looks back ECHO_S[0] from the newest line
+            newest = max(t for t, _ in self.others)
+            self.others = [(t, w) for t, w in self.others if newest - t <= sum(ECHO_S)]
+        return out
+
+    def echo(self, t, words):
+        heard = [w for s, ws in sorted(self.others, key=lambda x: x[0]) if -ECHO_S[1] <= t - s <= ECHO_S[0] for w in ws]
+        if not words or not heard:
+            return False
+        if len(words) < 3:
+            return f" {' '.join(words)} " in f" {' '.join(heard)} "
+        pairs, room = list(zip(words, words[1:])), set(zip(heard, heard[1:]))
+        return sum(p in room for p in pairs) >= 0.6 * len(pairs)
+
+
+ONE_TRACK_S = 180  # "You" has talked this long with no "Others" line: the other participants' audio is not reaching Muesli
+
+
+class Tracks:
+    """Watches for the Others track dying (2026-10-16, 09:06: the presenter and the room then arrived only through the
+    mic, as "You", for 46 minutes). Runs on the transcript's clock, so a replay sees what the live run saw.
+    check() returns "lost" or "back" on a change, else None."""
+
+    def __init__(self):
+        self.last_others, self.first, self.lost = None, None, False
+
+    def check(self, rows):
+        change = None
+        for r in rows:
+            t = _secs(r["timestamp_label"])
+            self.first = t if self.first is None else self.first
+            if r["speaker"] != "You":
+                if len(_words(r["text"])) < 3:  # a lone "Bye." leaked through twice while the track was dead
+                    continue
+                self.last_others = t
+                if self.lost:
+                    self.lost, change = False, "back"
+            elif not self.lost and t - (self.last_others if self.last_others is not None else self.first) > ONE_TRACK_S:
+                self.lost, change = True, "lost"
+        return change
 
 
 def format_batch(rows):
@@ -729,13 +802,17 @@ class Session:
             self._apply(obj)
 
     def _apply(self, obj):
-        for it in obj.get("say") or []:
+        says = [it for it in (obj.get("say") or []) if isinstance(it, dict)]
+        # three a reply, loudest first: on 2026-10-16 two answers posted 5 and 6 items, too many to read, all gone together
+        says = sorted(says, key=lambda it: -max(1, min(3, int(it.get("importance") or 1))))[:SAY_MAX]
+        answer, self.answering = getattr(self, "answering", False) and bool(says), False
+        for it in says:
             lines = [str(l).strip() for l in (it.get("lines") or []) if str(l).strip()][:3]
             if not lines:
                 continue
             self.n_say += 1
             item = {"id": f"s{self.n_say}", "pane": "say", "lines": lines, "source": str(it.get("source") or ""),
-                    "importance": max(1, min(3, int(it.get("importance") or 1))), "born": time.time()}
+                    "importance": max(1, min(3, int(it.get("importance") or 1))), "born": time.time(), **({"answer": True} if answer else {})}
             self.items[item["id"]] = item
             self.event("add", item)
             self.out("")  # logged as a NOTE block so the scorer and the judge read it like any other run
@@ -836,10 +913,12 @@ class Session:
             self.rec = {**self.rec, **extra, "state": state, "since": now()}
             self.event("rec", self.rec)
 
-    def expire(self, max_age=240):
-        # ponytail: a say item the model never retired leaves after four minutes; the page fades it the same way
+    def expire(self, max_age=240, answer_age=900):
+        # ponytail: a say item the model never retired leaves after four minutes, an answer to the user's question after
+        # fifteen (they asked for it, and may read it later); the model or the user retires either sooner
         with self.cond:
-            for i in [i for i in self.items.values() if i["pane"] == "say" and time.time() - i["born"] > max_age]:
+            for i in [i for i in self.items.values() if i["pane"] == "say"
+                      and time.time() - i["born"] > (answer_age if i.get("answer") else max_age)]:
                 self.retire(i["id"], "expire")
 
     def board_line(self):
@@ -879,6 +958,7 @@ class Session:
         line = (f'About {iid} "{text}": ' if iid else "") + (q or "more detail, the facts behind it")
         if self.rec["state"] != "recording":  # the board shows it too; the answer must not pretend to have heard the call
             line += " (Muesli is not transcribing right now: nothing new from the call has reached you; say so if they seem to expect it.)"
+        self.answering = True  # the next say items answer it: they stay up longer
         return self.send(f"[USER] {line}", label=f"you asked: {line}")
 
     def send_transcript(self, rows):
@@ -1017,6 +1097,7 @@ def main():
     session = Session(project, a.model, a.effort, name, log, a.show_transcript,
                       before=start[:10] if a.replay else None, pinned=pinned)  # a replay's brief stops before the call it replays
     session.title = f"{project.name} call"  # the Muesli recording's title when Tactician starts it
+    signal.signal(signal.SIGTERM, lambda *_: session.stop())  # Stop in the menu: as End on the board, with the wrap-up
     url = serve_board(session, a.port)
     session.out(c("2", f"{now()} board: {url or 'no free port'}"))
     if url and sys.stdin.isatty():  # the configured Chrome profile, as an app window on the side monitor
@@ -1034,12 +1115,15 @@ def main():
             feed = tail_replay(rows, a.speed)
             session.set_rec("recording")
         else:
-            if not active_meeting():  # starting Tactician starts the recording, through Muesli's own Shortcuts action
+            joined = active_meeting()  # a recording already running (an earlier call that never stopped it) is joined, not replayed
+            owns = False  # Tactician started this recording, so ending the run ends it too
+            if not joined:  # starting Tactician starts the recording, through Muesli's own Shortcuts action
                 can = has_shortcut()
                 session.set_rec("waiting", can_start=can)
                 if not can:
                     session.out(c("33", f"{now()} Muesli is not recording and there is no '{SHORTCUT}' shortcut (make it once: tactician --make-shortcut): start the recording in Muesli"))
                 elif start_recording(session.title):
+                    owns = True
                     session.out(c("2", f"{now()} asked Muesli to start recording '{session.title}'"))
                 else:
                     session.out(c("33", f"{now()} the '{SHORTCUT}' shortcut failed: start the recording in Muesli"))
@@ -1051,7 +1135,16 @@ def main():
             # replays never overwrite the record of a real meeting, so only a live run archives
             session.archive = MEETINGS_DIR / project.name / f"{datetime.now():%Y-%m-%d-%H%M}.md"
             session.header = f"# {project.name} meeting {start} (Muesli {m['id']})" + (f", with {a.participants}" if a.participants else "")
-            feed = tail_live(m["id"], print)
+            # a run joining a recording in progress starts two minutes back (Muesli stamps the others' track ~34 s early):
+            # on 2026-10-16 two restarts re-read everything since 08:30 and carried call 1's commitments into call 3
+            skip = (datetime.now() - timedelta(seconds=120)).strftime("%H:%M:%S") if joined else None
+            if skip:
+                session.out(c("2", f"{now()} joined a recording running since {start}: transcript before {skip} is an earlier call, skipped"))
+                with session.cond:
+                    session.pending.append(f"[CONTEXT] This run joined a recording that has been running since {start[11:]}. "
+                                           f"Transcript before {skip} belongs to an earlier call and is not shown; this call starts here.")
+            session.owns_recording = owns or "tactician" in (m["title"] or "").lower() or m["title"] == session.title
+            feed = tail_live(m["id"], print, skip_before=skip)
         last_row = time.time()
         # News from the agent sessions rides with the next slice. A replay reads them as of its own transcript clock: the
         # session files only grow, so it sees what the live run would have seen.
@@ -1059,6 +1152,7 @@ def main():
         clock = (lambda rows: time.time()) if not a.replay else (lambda rows: datetime.strptime(
             f"{day} {rows[-1]['timestamp_label']}", "%Y-%m-%d %H:%M:%S").timestamp() if rows else last_upd)
         last_upd = time.time() if not a.replay else datetime.strptime(start, "%Y-%m-%d %H:%M").timestamp()
+        echo, tracks = Echo(), Tracks()
         call_at = None  # live runs: the last time a call app (not Muesli) had the microphone
         looked, seen, why_not = 0, None, ""  # the meeting window: last look, fingerprint of the last image sent, why none
         shots = LOG_DIR / f"{name}.screens"  # every image the session saw, kept with the run's log
@@ -1106,14 +1200,31 @@ def main():
                 continue
             last_row = time.time()
             session.set_rec("recording")
+            track = tracks.check(rows)
+            if track:
+                at = rows[-1]["timestamp_label"]
+                with session.cond:
+                    session.pending.append(
+                        f"[AUDIO] Since about {at} only the \"You\" track arrives: the other participants' audio is not being "
+                        f"transcribed, and the microphone hears them through the speakers. Until a line from \"Others\" returns, "
+                        f"a \"You\" line can be anyone: treat it as the room unless the content makes it certain {USER} is speaking."
+                        if track == "lost" else f"[AUDIO] The other participants' track is back at {at}: \"You\" is {USER} again.")
+                session.set_rec("recording", one_track=track == "lost", track_at=at)
+                session.out(c("33", f"{now()} audio: the Others track is " + ("silent, only the mic is heard" if track == "lost" else "back")))
+            rows = echo.keep(rows)
+            if not rows:  # every line was the mic hearing the speakers
+                continue
             if not session.send_transcript(rows):
                 print(c("31", f"{now()} claude exited (code {session.p.returncode}); see logs/{name}.stderr.log"))
                 return 1
         session.set_rec("ended")
         session.finish()
-    except KeyboardInterrupt:  # Ctrl-C or Stop Now in the menu: no wrap-up; End on the board during a call: wrap up what it heard
+    except KeyboardInterrupt:  # Ctrl-C: no wrap-up; End on the board or Stop in the menu during a call: wrap up what it heard
         wrap = session.stop_asked and session.archive is not None
-        print(c("2", f"\n{now()} " + ("ended from the board, writing the wrap-up" if wrap else "interrupted, closing session")))
+        print(c("2", f"\n{now()} " + ("ended, writing the wrap-up" if wrap else "interrupted, closing session")))
+        if wrap and getattr(session, "owns_recording", False):  # the next call then gets a recording of its own
+            ok = stop_recording()
+            session.out(c("2" if ok else "33", f"{now()} " + ("asked Muesli to stop recording" if ok else "stop the recording in Muesli")))
         session.finish(wrapup=wrap, timeout=180 if wrap else 20)
     finally:
         log.close()
