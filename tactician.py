@@ -149,7 +149,8 @@ def lookup_prompt():
         f"[LOOKUP] `{LOOKUP}` is a read-only command over {USER}'s source of truth: what each project's status is now, "
         "blockers, who is waiting on whom, decisions, what is deployed in each environment, people. It is newer than the "
         f"brief and the digest. When a question turns on current status, a deployment or a person, run it (`{LOOKUP} --help` "
-        "once for its commands) before answering, at most two calls; its answer outranks older notes.")
+        "once for its commands) before answering, at most two calls; its answer outranks older notes. Start the command with "
+        "that exact full path (no cd, no relative path, or it is refused); piping into grep or head is fine.")
 
 
 def load_context(project):
