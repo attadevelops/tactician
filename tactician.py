@@ -56,6 +56,8 @@ STOP_SHORTCUT = CONFIG.get("stop_shortcut") or "Tactician Stop Meeting"  # Muesl
 CALL_GONE_S = 45  # the call app has let go of the microphone this long: the call is over
 SCREEN_S = 30  # how often the meeting window is looked at; an image goes to the session only when it changed
 CALL_WINDOW = re.compile(CONFIG.get("call_windows") or r"^Meet - |Zoom Meeting|Microsoft Teams|Huddle|Webex")  # window titles of a call
+# A read-only command over the tenant's source of truth (a second brain's CLI), which the session may run mid-call.
+LOOKUP = os.path.expanduser(CONFIG.get("lookup", ""))
 _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
 PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
@@ -103,27 +105,67 @@ MEETINGS_DIR = HOME / "meetings"  # archived wrap-ups, one file per live meeting
 DIGESTS_DIR = HOME / "digests"  # the channel readers' rolling digests, one per channel (skills/tactician-read), newest first
 
 
+def _context_lines(project):
+    for name in (project.parent.name, project.name):
+        f = CONTEXT_DIR / f"{name}.md"
+        if f.exists():
+            yield from f.read_text().splitlines()
+
+
+def _brief_spec(line, project):
+    """A brief: line's file and line limit (None for all)."""
+    spec = line.split(":", 1)[1].strip().replace("{project}", str(project))
+    path, limit = spec.rsplit(":", 1) if re.search(r":\d+$", spec) else (spec, "")
+    return Path(os.path.expanduser(path)), int(limit) if limit else None
+
+
+def brief_files(project):
+    """The context map's brief: files with their line limits, including ones that do not exist yet."""
+    return [_brief_spec(l, project) for l in _context_lines(project) if l.startswith("brief:")]
+
+
+def brief_news(seen, files):
+    """Lines new in the brief files since the last look, as one block or ''. `seen` (file -> its lines) is updated in
+    place; a file's first look only records it, so the brief the call started with is never sent twice."""
+    out = ""
+    for p, limit in files:
+        try:
+            lines = p.read_text().splitlines()[:limit]
+        except OSError:
+            seen.setdefault(p, set())  # a file that appears later is all news
+            continue
+        new = [l for l in lines if l.strip() and l not in seen.get(p, set())]
+        if p in seen and new:
+            out += f"--- {p.name} ---\n" + "\n".join(new) + "\n"
+        seen[p] = set(lines)
+    return out.strip()
+
+
+def lookup_prompt():
+    """The allow rule and prompt text for the config's lookup command, or (None, "") when it is unset or not runnable."""
+    if not LOOKUP or not os.access(LOOKUP, os.X_OK):
+        return None, ""
+    return f"Bash({LOOKUP}:*)", (
+        f"[LOOKUP] `{LOOKUP}` is a read-only command over {USER}'s source of truth: what each project's status is now, "
+        "blockers, who is waiting on whom, decisions, what is deployed in each environment, people. It is newer than the "
+        f"brief and the digest. When a question turns on current status, a deployment or a person, run it (`{LOOKUP} --help` "
+        "once for its commands) before answering, at most two calls; its answer outranks older notes.")
+
+
 def load_context(project):
     """contexts/<parent-dir>.md or contexts/<project>.md: add-dir: lines grant read access, brief: lines name files
     (path[:max-lines], {project} allowed) sent as the pre-meeting brief, every other line is prompt text."""
     text, dirs, brief = "", [], ""
-    for name in (project.parent.name, project.name):
-        f = CONTEXT_DIR / f"{name}.md"
-        if not f.exists():
-            continue
-        for line in f.read_text().splitlines():
-            if line.startswith("add-dir:"):
-                pattern = os.path.expanduser(line.split(":", 1)[1].strip())
-                dirs += [d for d in sorted(__import__("glob").glob(pattern)) if os.path.isdir(d)]
-            elif line.startswith("brief:"):
-                spec = line.split(":", 1)[1].strip().replace("{project}", str(project))
-                path, limit = spec.rsplit(":", 1) if re.search(r":\d+$", spec) else (spec, "")
-                p = Path(os.path.expanduser(path))
-                if p.is_file():
-                    lines = p.read_text().splitlines()[: int(limit) if limit else None]
-                    brief += f"\n--- {p.name} ---\n" + "\n".join(lines) + "\n"
-            else:
-                text += line + "\n"
+    for line in _context_lines(project):
+        if line.startswith("add-dir:"):
+            pattern = os.path.expanduser(line.split(":", 1)[1].strip())
+            dirs += [d for d in sorted(__import__("glob").glob(pattern)) if os.path.isdir(d)]
+        elif line.startswith("brief:"):
+            p, limit = _brief_spec(line, project)
+            if p.is_file():
+                brief += f"\n--- {p.name} ---\n" + "\n".join(p.read_text().splitlines()[:limit]) + "\n"
+        else:
+            text += line + "\n"
     for p in sorted(DIGESTS_DIR.glob("*.md")):  # ponytail: every channel in every brief; per-engagement filter if a Mac has several
         brief += f"\n--- {p.name} ---\n" + "\n".join(p.read_text().splitlines()[:120]) + "\n"
     return text.strip(), dirs, brief.strip()
@@ -585,7 +627,12 @@ class Session:
         if pinned:  # a replay of a run that saved its context: the digest and the brief as they stood at that call
             digest, brief = pinned["digest"], pinned["brief"]
         (LOG_DIR / (name + ".context.json")).write_text(json.dumps({"digest": digest, "brief": brief}) + "\n")
+        self.brief_files = [] if before else brief_files(project)  # re-read during the call; a replay keeps its snapshot
+        self.brief_seen = {}
+        brief_news(self.brief_seen, self.brief_files)
+        allow, lookup = (None, "") if before else lookup_prompt()  # a replay cannot ask today's truth about a past call
         prompt = PROMPT.replace("{root}", str(project)).replace("{user}", USER) + ("\n\n" + context if context else "") + (
+            "\n\n" + lookup if lookup else "") + (
             "\n\n[PROJECT DIGEST] The CLAUDE.md of the folders you can read, as of this call.\n" + digest if digest else "") + (
             "\n\n[PRE-MEETING BRIEF] Gathered before the call: the last call's wrap-up and recent work. Use it when it answers something; never restate it.\n" + brief if brief else "")
         cmd = [CLAUDE_BIN, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
@@ -593,7 +640,7 @@ class Session:
                "--setting-sources", "project", "--strict-mcp-config", "--max-turns", "12",
                "--settings", json.dumps(DENY_SETTINGS), "--name", name,
                "--append-system-prompt", prompt]
-        cmd += ["--tools", *TOOLS, "--allowedTools", *ALLOWED_TOOLS, "--disallowedTools", "Edit", "Write", "--add-dir", *add_dirs]
+        cmd += ["--tools", *TOOLS, "--allowedTools", *ALLOWED_TOOLS, *([allow] if allow else []), "--disallowedTools", "Edit", "Write", "--add-dir", *add_dirs]
         # Lean context: the session runs from an empty directory under /private/tmp, so the project's own CLAUDE.md, rules,
         # hooks and skills are not auto-discovered (37k tokens per turn in one large project, used by no note in a measured call); the
         # digest reaches it through the prompt above, not through add-dir loading. A cwd under ~ would load ~/AGENTS.md.
@@ -1043,6 +1090,11 @@ def main():
             t = clock(rows)
             if t - last_upd > UPDATE_S:
                 upd, last_upd = agent_activity(session.dirs, last_upd, until=t), t
+                news = brief_news(session.brief_seen, session.brief_files)
+                if news:
+                    with session.cond:
+                        session.pending.append("[UPDATE] New in the brief's files since your last look (the source of truth moved on):\n" + news)
+                    session.out(c("2", f"{now()} update from the brief files: {news.count(chr(10)) + 1} lines"))
                 if upd:
                     with session.cond:
                         session.pending.append(f"[UPDATE] What {USER} and their agent sessions said since your last look, newest last:\n" + upd)
