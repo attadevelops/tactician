@@ -25,9 +25,9 @@
     --muted: #8794a0;
     --spent: #5a6672;
     --done: #62d394;
-    /* One layout unit: 1px at 1920x1080, grows on bigger monitors, never below 1px (so the stated
-       minimum sizes hold). All sizes below are written as multiples of it. */
-    --u: max(1px, min(calc(100vw / 1920), calc(100vh / 1080)));
+    /* One layout unit: 1px at 1920x1080, grows on bigger monitors and shrinks with a laptop screen or a small
+       window, down to .6px, where the smallest text is still readable. All sizes below are multiples of it. */
+    --u: max(.6px, min(calc(100vw / 1920), calc(100vh / 1080)));
     --face: "Avenir Next Condensed", "Avenir Next", "DIN Condensed", "Helvetica Neue", "Arial Narrow", Arial, sans-serif;
   }
 
@@ -159,12 +159,16 @@
     color: var(--white);
   }
 
-  #stack { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  /* The Say pane scrolls: live items on top, then the Earlier list of what has left them. Scrolled down, nothing moves. */
+  #scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--spent) transparent; }
+  #stack { position: relative; display: flex; flex-direction: column; }
   #stack:empty::before { content: "Nothing to say right now."; padding-top: calc(6 * var(--u)); font-size: calc(32 * var(--u)); font-weight: 500; color: var(--spent); }
-  #stack.clip {
-    -webkit-mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
-    mask-image: linear-gradient(#000 calc(100% - 70px), transparent);
-  }
+  #earlier { margin: calc(26 * var(--u)) 0 calc(20 * var(--u)); }
+  #earlier:not(:has(li)) { display: none; }
+  #earlier h2 { padding-bottom: calc(10 * var(--u)); border-bottom: 1px solid rgba(238, 242, 244, .16); }
+  #past { list-style: none; margin: calc(12 * var(--u)) 0 0; padding: 0; }
+  #past li { margin: 0 0 calc(12 * var(--u)); font-size: calc(22 * var(--u)); font-weight: 500; line-height: 1.2; color: var(--dim); }
+  #past time { margin-right: .6em; font-variant-numeric: tabular-nums; color: var(--spent); }
   #stack.still, #stack.still * { transition: none !important; }   /* a joined board is correct on its first frame */
   /* No signal: what is on screen may be out of date, so it dims. */
   #stack, #agenda { transition: opacity 1s; }
@@ -359,7 +363,10 @@
       <span id="clock" role="timer" aria-label="Clock">00:00:00</span>
     </header>
     <div id="rec" role="alert" hidden><b id="rechead"></b><span id="rectext"></span><button type="button" id="recbtn" hidden>Start recording</button></div>
-    <div id="stack" role="log" aria-live="polite" aria-relevant="additions" aria-label="Things to say"></div>
+    <div id="scroll">
+      <div id="stack" role="log" aria-live="polite" aria-relevant="additions" aria-label="Things to say"></div>
+      <section id="earlier" aria-label="Earlier"><h2>Earlier</h2><ol id="past"></ol></section>
+    </div>
   </main>
 
   <footer class="foot">
@@ -379,7 +386,7 @@
   'use strict';
   const $ = (s) => document.querySelector(s);
   const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const board = $('.board'), pane = $('.agenda'), stack = $('#stack'), alist = $('#agenda'), rlist = $('#raised'), clist = $('#commits');
+  const board = $('.board'), pane = $('.agenda'), stack = $('#stack'), scroller = $('#scroll'), past = $('#past'), alist = $('#agenda'), rlist = $('#raised'), clist = $('#commits');
   const clock = $('#clock'), lineEl = $('#line'), statusEl = $('#status'), stateEl = $('#state'), lastEl = $('#last');
   const foot = $('.foot'), form = $('#ask'), qEl = $('#q'), aboutEl = $('#about'), moreBtn = $('#more'), lagEl = $('#lag');
   const verdictBtns = [$('#done'), $('#wrong')];
@@ -389,6 +396,7 @@
   const SILENCE_MS = 60000;   // no event for this long: no signal
   const BATCH_MS = 30;        // events that arrive together are applied together
   const ASK_MS = 90000;       // "asking" shows until the next say item arrives, or this long
+  const PAST_MAX = 300;       // Earlier keeps this many retired say items, newest first
 
   // item id -> { id, store, phase, el, text, ... }; say: live|done|retiring, agenda: live|struck, commits: live; any: gone (marked wrong)
   const say = new Map(), agenda = new Map(), commits = new Map();
@@ -402,7 +410,7 @@
   const later = (fn, ms) => { const ep = epoch; setTimeout(() => { if (ep === epoch) fn(); }, ms); };
   const imp = (n) => Math.max(1, Math.min(3, Math.round(+n) || 1));
   const daySecs = (t) => { const m = /^(\d\d):(\d\d):(\d\d)$/.exec(t || ''); return m ? m[1] * 3600 + m[2] * 60 + +m[3] : NaN; };
-  const sizeU = () => { U = Math.max(1, Math.min(innerWidth / 1920, innerHeight / 1080)); };
+  const sizeU = () => { U = Math.max(.6, Math.min(innerWidth / 1920, innerHeight / 1080)); };
 
   // ---------------------------------------------------------------- text
   // The model writes straight quotes and apostrophes; set them as typographic ones.
@@ -500,7 +508,7 @@
       } else if (e.kind === 'add' && pane === 'say') {
         const old = say.get(id);
         if ((old && old.phase !== 'retiring') || dies) continue;
-        const s = { id, store: say, phase: 'live', el: buildSay(e), text: (Array.isArray(e.lines) ? e.lines : []).join(' ') };
+        const s = { id, store: say, phase: 'live', el: buildSay(e), text: (Array.isArray(e.lines) ? e.lines : []).join(' '), at: new Date() };
         say.set(id, s);
         fresh.push({ s, silent, red: imp(e.importance) === 3 });
       } else if (e.kind === 'agenda') {
@@ -591,11 +599,25 @@
     s.el.classList.add('struck');
   }
 
+  // The user scrolled down to read: hold every retirement until they are back at the top.
+  const held = () => scroller.scrollTop > 4;
+
   function retire(s) {
     if (s.phase === 'retiring') return;
+    if (held()) return later(() => retire(s), 1000);
     s.phase = 'retiring';
     s.el.classList.add('retiring');
-    later(() => leave(s), calm ? 0 : 2000);
+    later(() => { remember(s); leave(s); }, calm ? 0 : 2000);
+  }
+
+  // A retired say item goes on to the Earlier list (a wrong one does not: the user threw it away).
+  function remember(s) {
+    if (s.store !== say || !s.text) return;
+    const li = document.createElement('li'), t = document.createElement('time');
+    t.textContent = hms(s.at || new Date()).slice(0, 5);
+    li.append(t, typo(s.text.replace(/^(WRONG|CAREFUL):\s*/, '$1: ')));
+    past.prepend(li);
+    while (past.children.length > PAST_MAX) past.lastChild.remove();
   }
 
   function leave(s) {
@@ -609,7 +631,7 @@
   function clearBoard() {
     epoch++;
     say.clear(); agenda.clear(); commits.clear();
-    stack.replaceChildren(); alist.replaceChildren(); rlist.replaceChildren(); clist.replaceChildren();
+    stack.replaceChildren(); past.replaceChildren(); alist.replaceChildren(); rlist.replaceChildren(); clist.replaceChildren();
     agSig = ''; fitAt = 0;
     showLine(null);
   }
@@ -654,10 +676,9 @@
     const kids = [...stack.children], last = kids[kids.length - 1];
     // layout position of the last item (offsetTop ignores the transforms of a glide in flight); scrollHeight cannot
     // say how much room is spare, because it is never smaller than the pane
-    const room = stack.clientHeight - (last ? last.offsetTop + last.offsetHeight : 0);
-    stack.classList.toggle('clip', room < -2);
+    const room = scroller.clientHeight - (last ? last.offsetTop + last.offsetHeight : 0);
     const t = performance.now();
-    if (t < fitAt) return;
+    if (t < fitAt || held()) return;
     if (room < -2) {
       const old = kids.slice(1).reverse().filter((e) => !e.matches('.done, .compact, .retiring, .leaving'));
       let deficit = -room;
