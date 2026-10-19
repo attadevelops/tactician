@@ -21,7 +21,8 @@ Shortcuts or System Settings, a sign-in): open the exact window for them, say th
 A company-managed Mac may block an install: then say what is blocked and carry on with the rest.
 - `python3` is 3.11 or newer; Muesli is in `/Applications`; `claude` is signed in.
 - SwiftBar is installed, has a plugin folder (`defaults read com.ameba.SwiftBar PluginDirectory`; when unset, write
-  `~/.config/swiftbar-plugins` there before SwiftBar's first launch), and is running.
+  `~/.config/swiftbar-plugins` there before SwiftBar's first launch), is running, and opens at login (a System Events
+  login item for `/Applications/SwiftBar.app`; without it the menu is gone after the next restart).
 - `install.sh` from the checkout has run (it links the command, the skills and the menu bar plugin, makes the tenant
   folder, and writes both shortcut files). It is plumbing and safe to re-run.
 - Both shortcuts are in `shortcuts list` (the config's `shortcut` and `stop_shortcut`, default "Tactician Start Meeting"
