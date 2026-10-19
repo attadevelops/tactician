@@ -356,7 +356,10 @@ def write_shortcut(name, action):
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     raw, signed = LOG_DIR / ".unsigned.shortcut", LOG_DIR / f"{name}.shortcut"  # sign reads only a .shortcut name
     raw.write_bytes(plistlib.dumps(shortcut, fmt=plistlib.FMT_BINARY))
-    subprocess.run(["shortcuts", "sign", "--mode", "anyone", "-i", str(raw), "-o", str(signed)], check=True)
+    r = subprocess.run(["shortcuts", "sign", "--mode", "anyone", "-i", str(raw), "-o", str(signed)], capture_output=True, text=True)
+    if r.returncode:  # signing needs iCloud; company-managed Macs often have none
+        sys.exit(f"Could not sign '{name}' ({(r.stderr or r.stdout).strip()}): without iCloud, build it in the Shortcuts app "
+                 "(claude /tactician-setup does it)")
     subprocess.run(["open", str(signed)], check=True)
     print(f"In Shortcuts: Add Shortcut ('{name}'). On its first run choose Always Allow, so it can reach Muesli.")
 

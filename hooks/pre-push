@@ -1,6 +1,7 @@
 #!/bin/bash
 # Never push a tenant's data. Installed with: git config core.hooksPath hooks
 # Blocks a push when a pushed commit descends from a private history (root SHAs in $TACTICIAN_HOME/blocked-roots), or when
+# an unpushed commit's author or committer is not in hooks/authors, or when
 # the pushed tree or the new commit messages contain a term from $TACTICIAN_HOME/denylist (one per line, whole words, any case).
 T="${TACTICIAN_HOME:-$HOME/.tactician}"
 zero=0000000000000000000000000000000000000000
@@ -11,6 +12,11 @@ while read -r lref lsha rref rsha; do
       echo "pre-push: $lref contains the private history rooted at $r; refusing" >&2; exit 1
     fi
   done
+  # a company email in a public history names the tenant; set the personal one: git config user.email <it>
+  bad=$(git log --format='%ae%n%ce' "$lsha" --not --remotes=origin | sort -u | grep -v -x -F -f <(grep -v '^#' "$(dirname "$0")/authors"))
+  if [ -n "$bad" ]; then
+    echo "pre-push: $lref has commits by an identity not in hooks/authors ($bad); fix git config user.email and the commits; refusing" >&2; exit 1
+  fi
   [ -s "$T/denylist" ] || continue
   if hits=$(git grep -I -i -w -l -E -f "$T/denylist" "$lsha" -- .) && [ -n "$hits" ]; then
     echo "pre-push: tenant terms in these files of $lref; refusing:" >&2; echo "$hits" >&2; exit 1

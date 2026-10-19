@@ -28,6 +28,13 @@ A company-managed Mac may block an install: then say what is blocked and carry o
   and "Tactician Stop Meeting"). `install.sh` opens Shortcuts on each signed file: the user clicks Add Shortcut. Run the
   stop shortcut once (harmless when nothing records) so its Always Allow prompt for Muesli is answered now, not mid-call.
   Never run the start shortcut in a test: it starts a real recording.
+  When signing fails (no iCloud, common on a company-managed Mac), build both in the Shortcuts app by UI scripting
+  (System Events): a new shortcut, its name, the Muesli action found by search and added with Return. The start one's
+  Title cannot be bound to Shortcut Input this way, so it gets a fixed title (Tactician finds the recording by status).
+  The first run's "Allow ... to output 1 boolean?" is in no accessibility tree: it needs a real mouse click (a CGEvent
+  at the button), or the user's click.
+- The checkout commits as the repo owner's personal identity: `git -C <checkout> config user.email` is in
+  `hooks/authors`, never the company account (set it repo-local; the pre-push guard refuses anything else).
 - SwiftBar has Screen Recording (it reads call window titles): open
   `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`, the user turns SwiftBar on.
 - The Tactician icon is visible in the menu bar, not hidden under the notch: when it is missing, set
