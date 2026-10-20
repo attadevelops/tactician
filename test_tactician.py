@@ -38,7 +38,7 @@ import threading
 def fake(ended=False):
     s = la.Session.__new__(la.Session); s.log = FakeOut(); s.ended = ended; s.wrapup = ""
     s.items, s.n_say, s.n_agenda, s.n_commit, s.events, s.items_log, s.cond = {}, 0, 0, 0, [], FakeOut(), threading.Condition()
-    s.pending, s.screen, s.look = [], None, False
+    s.pending, s.screen, s.look, s.closed = [], None, False, threading.Event()
     s.rec, s.title = {"state": "recording", "since": "", "can_start": False}, "proj call"
     return s
 s = fake()
@@ -239,7 +239,7 @@ class FakeP:
     stdin = FakeOut(); stdin.close = lambda: None
     def poll(self): return None
     def wait(self, timeout=None): return 0
-s3 = fake(); s3.p, s3.lock, s3.stderr, s3.out = FakeP(), threading.Lock(), FakeOut(), lambda *_: None
+s3 = fake(); s3.post = []; s3.p, s3.lock, s3.stderr, s3.out = FakeP(), threading.Lock(), FakeOut(), lambda *_: None
 s3.stderr.close = s3.items_log.close = lambda: None
 s3.archive, s3.header, s3.turns, s3.cost, s3.cwd, s3.session_id = la.MEETINGS_DIR / "rv" / "2026-10-19-1130.md", "# call", 1, 0.0, tmp, "x"
 s3._ask_after = lambda msg, *a: "## general\n1. do y" if msg.startswith("[PACKETS]") else "Flagged: x"

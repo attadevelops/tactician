@@ -27,3 +27,8 @@ stop_shortcut = "Tactician Stop Meeting"
 # A read-only command over your source of truth (e.g. a second brain's CLI wrapper that only allows read subcommands).
 # The call session may run it mid-call for current status, deployments and who is waiting; it is never given write access.
 # lookup = "~/notes/brain/read-only-cli"
+
+# Send on the board after a call: lane (as the action packets name it) = the cmux workspace title of that lane's
+# Claude session. A lane with no entry keeps only Copy.
+# [sessions]
+# acme-search = "ACME search"

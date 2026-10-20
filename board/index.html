@@ -173,6 +173,9 @@
   #summary h2 button { float: right; padding: .1em .7em; font: inherit; font-size: .7em; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .3); border-radius: .3em; cursor: pointer; }
   #summary .txt { white-space: pre-wrap; color: var(--white); }
   #summary .note { color: var(--dim); }
+  #summary label { display: block; margin: .3em 0; color: var(--white); cursor: pointer; }
+  #summary label input { margin-right: .6em; transform: scale(1.3); }
+  #summary .send { margin: .6em 0 0; padding: .2em .8em; font: inherit; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .5); border-radius: .3em; cursor: pointer; }
   #past time { margin-right: .6em; font-variant-numeric: tabular-nums; color: var(--spent); }
   #stack.still, #stack.still * { transition: none !important; }   /* a joined board is correct on its first frame */
   /* No signal: what is on screen may be out of date, so it dims. */
@@ -383,6 +386,7 @@
     <span class="state" id="state" role="status"><span class="dot"></span><span id="status">listening</span></span>
     <span class="lag" id="lag" title="Speech to board: how long after the newest line Tactician had heard the last item arrived"></span>
     <span class="last">last event <time id="last">--:--:--</time></span>
+    <button type="button" id="wrap" title="The wrap-up and action items so far, to approve and send; the call goes on">Wrap Up</button>
     <button type="button" id="end" title="End Tactician: during a call it writes the wrap-up first">✕ End</button>
   </footer>
 </div>
@@ -507,6 +511,7 @@
 
     for (const e of evs) {
       if (e.kind === 'rec') { setRec(e); continue; }
+      if (e.kind === 'summary') { wrapBtn.disabled = false; wrapBtn.textContent = 'Wrap Up'; showSummary(e.wrapup, e.packets, true); continue; }
       const id = String(e.id), pane = paneOf(e), dies = ends.has(pane + ':' + id), silent = e.seq === 0;
       if (e.kind === 'transcript') {
         line = e;
@@ -797,7 +802,8 @@
       : rec === 'recording' && e.one_track ? ['Only your mic is heard. ', "Since " + (e.track_at || '') + " the others' audio isn't being transcribed, so Tactician can't tell who is talking. Check Muesli."]
       : REC[rec];
     if (rec === 'done') { endBtn.disabled = false; endBtn.textContent = 'Close window'; endBtn.classList.remove('armed'); }
-    if (rec === 'done' && e.wrapup) showSummary(e.wrapup, e.packets || {});
+    if (rec === 'done') wrapBtn.hidden = true;
+    if (rec === 'done' && e.wrapup) showSummary(e.wrapup, e.packets || {}, false);
     else if (rec === 'done' && ending) window.close();   // ended before any call: nothing to show
     recEl.hidden = !t;
     if (t) {
@@ -818,36 +824,75 @@
       .catch(() => { recBtn.disabled = false; recBtn.textContent = 'Failed: start it in Muesli'; });
   });
 
-  // The wrap-up and the per-lane action packets, in place of the board once Tactician is done. Each packet has a copy
-  // button: it is written for that lane's project session, and goes there only when the user hands it over.
-  function showSummary(wrapup, packets) {
+  // The wrap-up and the per-lane action packets: in place of the board once Tactician is done, or on top of it during
+  // the call after Wrap Up. Each numbered action item has a tick box; Send types the ticked ones into that lane's
+  // project session (config [sessions]), and nothing goes anywhere without that click.
+  function showSummary(wrapup, packets, live) {
     const box = $('#summary');
-    if (!box.hidden) return;   // a replayed event
-    const part = (title, text, copy) => {
+    box.replaceChildren();
+    const head = (title, text) => {
       const h = document.createElement('h2'); h.textContent = title;
-      if (copy) {
-        const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Copy';
-        b.addEventListener('click', () => navigator.clipboard.writeText(text).then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Copy failed'; }));
-        h.append(b);
-      }
-      const d = document.createElement('div'); d.className = 'txt'; d.textContent = text;
-      box.append(h, d);
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Copy';
+      b.addEventListener('click', () => navigator.clipboard.writeText(text).then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Copy failed'; }));
+      h.append(b); box.append(h);
     };
-    part('Wrap-up', wrapup, true);
-    for (const [lane, body] of Object.entries(packets)) part('Action packet: ' + lane, body, true);
+    const txt = (t) => { if (t.trim()) { const d = document.createElement('div'); d.className = 'txt'; d.textContent = t; box.append(d); } };
+    if (live) {
+      const back = document.createElement('button'); back.type = 'button'; back.className = 'send'; back.textContent = 'Back to the call';
+      back.addEventListener('click', hideSummary); box.append(back);
+    }
+    head(live ? 'Wrap-up so far' : 'Wrap-up', wrapup || 'No wrap-up came back.');
+    txt(wrapup || '');
+    for (const [lane, body] of Object.entries(packets || {})) {
+      head('Action packet: ' + lane, body);
+      const ticks = [];
+      let rest = '';
+      for (const line of body.split('\n')) {
+        if (/^\d+\.\s/.test(line)) {
+          txt(rest); rest = '';
+          const l = document.createElement('label'), cb = document.createElement('input');
+          cb.type = 'checkbox'; l.append(cb, line); box.append(l); ticks.push([cb, line]);
+        } else rest += line + '\n';
+      }
+      txt(rest);
+      if (ticks.length) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'send'; b.textContent = 'Send ticked items to ' + lane;
+        b.addEventListener('click', () => {
+          const items = ticks.filter(([cb]) => cb.checked).map(([, line]) => line).join('\n');
+          if (!items) { b.textContent = 'Tick at least one item'; return; }
+          b.disabled = true; b.textContent = 'Sending…';
+          fetch('/send', { method: 'POST', body: JSON.stringify({ token: TOKEN, lane, items }) })
+            .then((r) => { if (!r.ok) throw new Error(r.status); b.textContent = 'Sent to the ' + lane + ' session'; })
+            .catch(() => { b.disabled = false; b.textContent = 'Not sent: no open session for ' + lane + ' (config [sessions]); use Copy'; });
+        });
+        box.append(b);
+      }
+    }
     const n = document.createElement('p'); n.className = 'note';
-    n.textContent = 'Saved with the meeting notes. Paste a packet into its project session to act on it; nothing was sent to anyone.';
+    n.textContent = live ? 'The call goes on; the final wrap-up comes when it ends.' : 'Saved with the meeting notes. Only the items you send reach a session.';
     box.append(n);
     stack.style.display = $('#earlier').style.display = 'none'; box.hidden = false;
     scroller.scrollTop = 0;
   }
+  function hideSummary() {
+    $('#summary').hidden = true; stack.style.display = $('#earlier').style.display = '';
+  }
+
+  // Wrap Up: the wrap-up and packets so far, while the call goes on; they arrive as a summary event.
+  const wrapBtn = $('#wrap');
+  wrapBtn.addEventListener('click', () => {
+    wrapBtn.disabled = true; wrapBtn.textContent = 'Wrapping up…';
+    fetch('/wrapup', { method: 'POST', body: JSON.stringify({ token: TOKEN }) })
+      .then((r) => { if (!r.ok) throw new Error(r.status); })
+      .catch(() => { wrapBtn.disabled = false; wrapBtn.textContent = 'Wrap Up: only once a call records'; });
+  });
 
   // End: the first click arms it (no browser dialog), the second stops Tactician. Closing the window alone does not stop it,
   // and nothing here stops it on unload, so a reload never ends a call.
   const endBtn = $('#end');
   let endArmed = 0, ending = false;
   endBtn.addEventListener('click', () => {
-    if (rec === 'done') { window.close(); return; }
+    if (rec === 'done') { fetch('/close', { method: 'POST', body: JSON.stringify({ token: TOKEN }) }).finally(() => window.close()); return; }
     if (Date.now() - endArmed > 4000) {
       endArmed = Date.now();
       endBtn.textContent = 'End Tactician? Click again';

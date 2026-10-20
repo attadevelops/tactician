@@ -617,7 +617,9 @@ class BoardHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """/ask {token, q, id, text}: a question typed on the board, or about item id; answered as a say item.
         /mark {token, id, verdict, note}: done retires item id as the model would, wrong takes it off and tells the model why.
-        /stop {token}: the board's End button. /record {token}: the banner's Start recording button."""
+        /stop {token}: the board's End button. /record {token}: the banner's Start recording button.
+        /send {token, lane, items}: ticked action items to that lane's session. /close {token}: the board closed after the call.
+        /wrapup {token}: the wrap-up and packets so far, while the call goes on."""
         try:
             d = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8000)))
         except ValueError:
@@ -626,6 +628,9 @@ class BoardHandler(http.server.BaseHTTPRequestHandler):
         act = {"/ask": lambda: self.session.ask(get("q"), get("id"), get("text")),
                "/mark": lambda: self.session.mark(get("id"), get("verdict"), get("note")),
                "/stop": lambda: self.session.stop(),
+               "/send": lambda: self.session.send_items(get("lane"), get("items")),
+               "/wrapup": lambda: self.session.checkpoint(),
+               "/close": lambda: self.session.closed.set() or True,
                "/record": lambda: self.session.rec["can_start"] and start_recording(self.session.title)}.get(self.path)
         ok = (act and self._local() and isinstance(d, dict)
               and secrets.compare_digest(get("token").encode(), self.token.encode()) and act())
@@ -687,6 +692,7 @@ def serve_board(session, port=8770):
 
 # ---------------------------------------------------------------- Claude session
 class Session:
+    collecting = False  # a Wrap Up during the call: plain-text replies are its wrap-up and packets
     def __init__(self, project, model, effort, name, log, show_transcript, before=None, pinned=None):
         if not CLAUDE_BIN:
             sys.exit("claude binary not found")
@@ -727,6 +733,7 @@ class Session:
         self.show_transcript = show_transcript
         self.archive, self.header, self.ended, self.wrapup = None, "", False, ""  # wrap-up archive: main() sets it once a live call records
         self.stop_asked = False  # End on the board
+        self.closed = threading.Event()  # the board closed after the call (or Stop in the menu): the run may exit
         self.screen, self.look = None, False  # (title, jpeg) for the next slice; the model asked for a fresh look
         self.rec = {"state": "waiting", "since": now(), "can_start": False}  # Muesli: waiting, recording, stalled or ended
         self.post = []  # plain-text replies after [MEETING ENDED]: the wrap-up, then the packets
@@ -796,7 +803,7 @@ class Session:
             self.out("")
             self.out(c("1;32" if label == "ANSWER" else "1;36", f"{now()} {label}") + "\n" + text)
             self.out("")
-            if self.ended:
+            if self.ended or self.collecting:
                 with self.cond:
                     self.post.append(text)
                     self.cond.notify_all()
@@ -905,10 +912,43 @@ class Session:
     def stop(self):
         """End on the board: interrupt main() as Ctrl-C does, a moment later so the page gets its answer first; main() then
         wraps up if a live call was recording. A wrap-up already under way (the call ended in Muesli) is left to finish."""
+        self.closed.set()
         if not (self.stop_asked or self.ended):
             self.stop_asked = True
             threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGINT)).start()
         return True
+
+    def send_items(self, lane, items):
+        """Items the user ticked on the end screen go to that lane's project session: config [sessions] maps the lane to a
+        cmux workspace title. One line, so the session's prompt takes it as one message; the packet holds the context.
+        Each send is recorded next to the packet. True when it was typed into the session."""
+        want, items = CONFIG.get("sessions", {}).get(lane), " | ".join(" ".join(i.split()) for i in items.splitlines() if i.strip())
+        if not (want and items and self.archive):
+            return False
+        packet = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
+        msg = (f"Action items from the {self.archive.stem} call, approved by {USER}: {items} -- Context: {packet}. "
+               "Triage, gather what you need and propose; stop before anything client-facing or any commitment.")
+        env = {**os.environ, "CMUX_QUIET": "1"}
+        try:
+            ws = subprocess.run(["cmux", "list-workspaces"], capture_output=True, text=True, timeout=10, env=env).stdout
+            ref = next(m.group() for line in ws.splitlines() if want in line for m in [re.search(r"workspace:\d+", line)] if m)
+            ok = all(subprocess.run(["cmux", *cmd], capture_output=True, timeout=10, env=env).returncode == 0
+                     for cmd in (["send", "--workspace", ref, msg], ["send-key", "--workspace", ref, "enter"]))
+        except (StopIteration, OSError, subprocess.TimeoutExpired):
+            return False
+        if ok:
+            with self.archive.with_name(f"{self.archive.stem}-sent-{lane}.md").open("a") as f:
+                f.write(f"{now()} sent to {want} ({ref}):\n{msg}\n\n")
+            self.out(c("2", f"{now()} sent {lane} items to {want}"))
+        return ok
+
+    def linger(self, minutes=20):
+        """After a saved wrap-up the board stays served, so its Send buttons work, until Close window, Stop in the menu
+        or twenty minutes."""
+        try:
+            self.closed.wait(minutes * 60)
+        except KeyboardInterrupt:
+            pass
 
     def set_rec(self, state, **extra):
         """Muesli's recording state, for the board's banner; an event only on a change."""
@@ -984,18 +1024,42 @@ class Session:
             self.cond.wait_for(lambda: len(self.post) >= n or self.p.poll() is not None, timeout)
         return self.post[n - 1] if len(self.post) >= n else ""
 
+    def _wrap(self, ask, label, packets_msg, timeout):
+        """The wrap-up and, on a live call, one packet file per lane next to it: (wrapup, {lane: body})."""
+        n, packets = len(self.post), {}
+        wrapup = self._ask_after(ask, label, n + 1, timeout)
+        if wrapup and self.archive:
+            packets = split_packets(self._ask_after(packets_msg.replace("{user}", USER), "asking for the action packets", n + 2, timeout))
+            self.archive.parent.mkdir(parents=True, exist_ok=True)
+            for lane, body in packets.items():
+                path = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
+                path.write_text(f"{self.header}\nAction packet for {lane}; the wrap-up is in {self.archive.name}.\n\n{body}\n")
+                self.out(c("2", f"{now()} packet archived: {path}"))
+        return wrapup, packets
+
+    def checkpoint(self):
+        """Wrap Up on the board: the wrap-up and the packets so far, shown for approval while the call goes on (the
+        live notes pause while the model writes them). The end of the call writes the final ones."""
+        if self.ended or self.collecting or not self.archive:
+            return False
+
+        def run():
+            self.collecting = True
+            try:
+                w, packets = self._wrap(f"[WRAP-UP SO FAR] {USER} asked for the wrap-up of the call so far; the call is still going. "
+                                        "Reply in plain text exactly as for [MEETING ENDED], then go back to following the call.",
+                                        "asked for the wrap-up so far", PACKETS_MSG.replace("The call is over.", "The call is still going: cover it so far."), 180)
+            finally:
+                self.collecting = False
+            self.event("summary", {"wrapup": w, "packets": packets})
+        threading.Thread(target=run, daemon=True).start()
+        return True
+
     def finish(self, wrapup=True, timeout=180):
         packets = {}
         if self.p.poll() is None and wrapup:
             self.ended = True
-            self.wrapup = self._ask_after("[MEETING ENDED] Give the wrap-up now.", "meeting ended, asking for the wrap-up", 1, timeout)
-            if self.wrapup and self.archive:  # live runs only: one packet file per lane, next to the wrap-up
-                packets = split_packets(self._ask_after(PACKETS_MSG.replace("{user}", USER), "asking for the action packets", 2, timeout))
-                self.archive.parent.mkdir(parents=True, exist_ok=True)
-                for lane, body in packets.items():
-                    path = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
-                    path.write_text(f"{self.header}\nAction packet for {lane}; the wrap-up is in {self.archive.name}.\n\n{body}\n")
-                    self.out(c("2", f"{now()} packet archived: {path}"))
+            self.wrapup, packets = self._wrap("[MEETING ENDED] Give the wrap-up now.", "meeting ended, asking for the wrap-up", PACKETS_MSG, timeout)
         try:
             with self.lock:
                 self.p.stdin.close()
@@ -1233,6 +1297,8 @@ def main():
         session.finish(wrapup=wrap, timeout=180 if wrap else 20)
     finally:
         log.close()
+    if session.rec.get("saved"):
+        session.linger()
     return 0
 
 

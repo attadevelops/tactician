@@ -14,7 +14,9 @@ fi
 logo() { sed "s/#000/$1/g" "$C/logo.svg" | base64; }  # SwiftBar decodes the SVG natively; $1 recolors it
 
 if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
-  if grep -q -e "turn error" -e "claude exited" "$OUT"; then
+  if grep -q "[0-9] done: " "$OUT"; then  # the call is over; the board stays open for its wrap-up and Send buttons
+    echo " | image=$(logo '#34C759')"; state="Finished: wrap-up on the board"
+  elif grep -q -e "turn error" -e "claude exited" "$OUT"; then
     echo " | sfimage=exclamationmark.triangle.fill sfcolor=systemYellow"; state="Problem: see Console"
   elif grep -q "recording detected" "$OUT"; then
     echo " | image=$(logo '#FF3B30')"; state="Live: following the call"
@@ -26,7 +28,8 @@ if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
   echo "$state | size=13"
   echo "Project: $proj | size=12"
   echo "Open Board | $RUN param1=board sfimage=rectangle.split.2x1"
-  echo "Stop and Wrap Up | $RUN param1=stop sfimage=stop.circle"
+  if [[ $state == Finished* ]]; then echo "Close Board | $RUN param1=stop sfimage=xmark.circle"
+  else echo "Stop and Wrap Up | $RUN param1=stop sfimage=stop.circle"; fi
 else
   echo " | templateImage=$(logo '#000')"
   echo "---"
