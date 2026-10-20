@@ -234,6 +234,19 @@ s2._note('{"say": [{"lines": ["in flight"], "importance": 1}]}'); s2._note("Flag
 assert s2.post == ["Flagged: x\nCommitments: y", "## ACME-SEARCH\n1. do x\n## general\n1. do y"] and "s1" in s2.items, s2.post  # items in flight are not the wrap-up
 assert la.split_packets(s2.post[1]) == {"acme-search": "1. do x", "general": "1. do y"}, la.split_packets(s2.post[1])
 assert la.split_packets("no sections") == {}
+# the end: the board's done event carries the wrap-up and the packets, so End shows them instead of closing the window
+class FakeP:
+    stdin = FakeOut(); stdin.close = lambda: None
+    def poll(self): return None
+    def wait(self, timeout=None): return 0
+s3 = fake(); s3.p, s3.lock, s3.stderr, s3.out = FakeP(), threading.Lock(), FakeOut(), lambda *_: None
+s3.stderr.close = s3.items_log.close = lambda: None
+s3.archive, s3.header, s3.turns, s3.cost, s3.cwd, s3.session_id = la.MEETINGS_DIR / "rv" / "2026-10-19-1130.md", "# call", 1, 0.0, tmp, "x"
+s3._ask_after = lambda msg, *a: "## general\n1. do y" if msg.startswith("[PACKETS]") else "Flagged: x"
+la.time.sleep, sleep = (lambda *_: None), la.time.sleep
+s3.finish(); la.time.sleep = sleep
+done = s3.events[-1]
+assert done["kind"] == "rec" and done["state"] == "done" and done["wrapup"] == "Flagged: x" and done["packets"] == {"general": "1. do y"}, done
 print("brief ok")
 
 # replay source: a past run's log (indented transcript lines only; colour codes, notes and status lines dropped)

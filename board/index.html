@@ -168,6 +168,11 @@
   #earlier h2 { padding-bottom: calc(10 * var(--u)); border-bottom: 1px solid rgba(238, 242, 244, .16); }
   #past { list-style: none; margin: calc(12 * var(--u)) 0 0; padding: 0; }
   #past li { margin: 0 0 calc(12 * var(--u)); font-size: calc(22 * var(--u)); font-weight: 500; line-height: 1.2; color: var(--dim); }
+  #summary { margin: calc(26 * var(--u)) 0; font-size: calc(22 * var(--u)); line-height: 1.3; }
+  #summary h2 { margin: calc(22 * var(--u)) 0 calc(10 * var(--u)); padding-bottom: calc(10 * var(--u)); border-bottom: 1px solid rgba(238, 242, 244, .16); }
+  #summary h2 button { float: right; padding: .1em .7em; font: inherit; font-size: .7em; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .3); border-radius: .3em; cursor: pointer; }
+  #summary .txt { white-space: pre-wrap; color: var(--white); }
+  #summary .note { color: var(--dim); }
   #past time { margin-right: .6em; font-variant-numeric: tabular-nums; color: var(--spent); }
   #stack.still, #stack.still * { transition: none !important; }   /* a joined board is correct on its first frame */
   /* No signal: what is on screen may be out of date, so it dims. */
@@ -365,6 +370,7 @@
     <div id="rec" role="alert" hidden><b id="rechead"></b><span id="rectext"></span><button type="button" id="recbtn" hidden>Start recording</button></div>
     <div id="scroll">
       <div id="stack" role="log" aria-live="polite" aria-relevant="additions" aria-label="Things to say"></div>
+      <section id="summary" aria-label="Wrap-up" hidden></section>
       <section id="earlier" aria-label="Earlier"><h2>Earlier</h2><ol id="past"></ol></section>
     </div>
   </main>
@@ -783,7 +789,7 @@
     waiting: ['Not recording. ', "Muesli isn't transcribing this call, so Tactician can't hear it."],
     stalled: ['No transcript for a minute. ', 'Muesli is recording but nothing is arriving: check Muesli.'],
     ended: ['Recording ended. ', 'Tactician is writing the wrap-up.'],
-    done: ['Tactician has finished. ', 'The wrap-up is saved. You can close this window.'],
+    done: ['Tactician has finished. ', 'The wrap-up is saved; it and the action packets are below.'],
   };
   function setRec(e) {
     rec = e.state;
@@ -791,6 +797,8 @@
       : rec === 'recording' && e.one_track ? ['Only your mic is heard. ', "Since " + (e.track_at || '') + " the others' audio isn't being transcribed, so Tactician can't tell who is talking. Check Muesli."]
       : REC[rec];
     if (rec === 'done') { endBtn.disabled = false; endBtn.textContent = 'Close window'; endBtn.classList.remove('armed'); }
+    if (rec === 'done' && e.wrapup) showSummary(e.wrapup, e.packets || {});
+    else if (rec === 'done' && ending) window.close();   // ended before any call: nothing to show
     recEl.hidden = !t;
     if (t) {
       recEl.classList.toggle('soft', rec !== 'waiting' && !(rec === 'recording' && e.one_track));
@@ -810,10 +818,34 @@
       .catch(() => { recBtn.disabled = false; recBtn.textContent = 'Failed: start it in Muesli'; });
   });
 
+  // The wrap-up and the per-lane action packets, in place of the board once Tactician is done. Each packet has a copy
+  // button: it is written for that lane's project session, and goes there only when the user hands it over.
+  function showSummary(wrapup, packets) {
+    const box = $('#summary');
+    if (!box.hidden) return;   // a replayed event
+    const part = (title, text, copy) => {
+      const h = document.createElement('h2'); h.textContent = title;
+      if (copy) {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Copy';
+        b.addEventListener('click', () => navigator.clipboard.writeText(text).then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Copy failed'; }));
+        h.append(b);
+      }
+      const d = document.createElement('div'); d.className = 'txt'; d.textContent = text;
+      box.append(h, d);
+    };
+    part('Wrap-up', wrapup, true);
+    for (const [lane, body] of Object.entries(packets)) part('Action packet: ' + lane, body, true);
+    const n = document.createElement('p'); n.className = 'note';
+    n.textContent = 'Saved with the meeting notes. Paste a packet into its project session to act on it; nothing was sent to anyone.';
+    box.append(n);
+    stack.style.display = $('#earlier').style.display = 'none'; box.hidden = false;
+    scroller.scrollTop = 0;
+  }
+
   // End: the first click arms it (no browser dialog), the second stops Tactician. Closing the window alone does not stop it,
   // and nothing here stops it on unload, so a reload never ends a call.
   const endBtn = $('#end');
-  let endArmed = 0;
+  let endArmed = 0, ending = false;
   endBtn.addEventListener('click', () => {
     if (rec === 'done') { window.close(); return; }
     if (Date.now() - endArmed > 4000) {
@@ -825,8 +857,9 @@
     }
     endBtn.disabled = true;
     endBtn.textContent = 'Ending…';
+    ending = true;   // the window stays: the wrap-up and the packets arrive with the done event
     fetch('/stop', { method: 'POST', body: JSON.stringify({ token: TOKEN }) })
-      .then((r) => { if (!r.ok) throw new Error(r.status); endBtn.textContent = 'Ended, close this window'; window.close(); })
+      .then((r) => { if (!r.ok) throw new Error(r.status); endBtn.textContent = 'Writing the wrap-up…'; })
       .catch(() => {   // no server: either the run already finished (close the window) or it is stuck (the menu bar's Stop)
         endBtn.disabled = false;
         endBtn.textContent = !linkUp ? 'Tactician has stopped: close this window' : 'End failed: use Stop in the menu bar';

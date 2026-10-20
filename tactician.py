@@ -985,6 +985,7 @@ class Session:
         return self.post[n - 1] if len(self.post) >= n else ""
 
     def finish(self, wrapup=True, timeout=180):
+        packets = {}
         if self.p.poll() is None and wrapup:
             self.ended = True
             self.wrapup = self._ask_after("[MEETING ENDED] Give the wrap-up now.", "meeting ended, asking for the wrap-up", 1, timeout)
@@ -1007,7 +1008,8 @@ class Session:
             self.archive.write_text(f"{self.header}\n\n{self.wrapup}\n")
             self.out(c("2", f"{now()} wrap-up archived: {self.archive}"))
         self.out(c("2", f"{now()} done: {self.turns} turns, est. ${self.cost:.3f}; resume with: cd {self.cwd} && claude --resume {self.session_id}"))
-        self.set_rec("done", saved=bool(self.wrapup and self.archive))  # the board's last word: it says so and End just closes it
+        saved = bool(self.wrapup and self.archive)  # the board's last word: it shows the wrap-up and packets, End just closes it
+        self.set_rec("done", saved=saved, **({"wrapup": self.wrapup, "packets": packets} if saved else {}))
         self.items_log.close()
         time.sleep(1.5)  # ponytail: time for the event stream to deliver it before the process (and its server) exits
 
