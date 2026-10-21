@@ -117,7 +117,12 @@ CLAUDE.md, rules, hooks and skills are not auto-loaded (tens of thousands of tok
 ## After the call
 
 The wrap-up goes to `meetings/<project>/<date>.md` and feeds the next brief; one action packet per project lane the
-call touched goes next to it, written for a project's agent session to triage (handing them over is manual).
+call touched goes next to it, written for a project's agent session to triage.
+- The board shows them when the call ends: tick the action items you approve and Send types them into the cmux session
+  working in that lane's folder (config `[sessions]` picks one when several share a folder); each send is recorded beside
+  the packet. Sessions triage and propose only, and act on your go.
+- The config's `after_call` command, when set, starts on the saved wrap-up (its path as the last argument) once a call
+  that heard the room ends, detached, with its output in `logs/after-call-*.log`: a second brain's ingest, for example.
 The `tactician-review` skill (`skills/tactician-review/`, link it into `~/.claude/skills`) grades the run with the LLM judge,
 collects your verdicts into an eval file, folds repeated failures into the prompt behind a judged replay, and runs the
 tenant's post-call steps.
