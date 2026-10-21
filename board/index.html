@@ -173,8 +173,16 @@
   #summary h2 button { float: right; padding: .1em .7em; font: inherit; font-size: .7em; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .3); border-radius: .3em; cursor: pointer; }
   #summary .txt { white-space: pre-wrap; color: var(--white); }
   #summary .note { color: var(--dim); }
-  #summary label { display: block; margin: .3em 0; color: var(--white); cursor: pointer; }
-  #summary label input { margin-right: .6em; transform: scale(1.3); }
+  #summary .fix { margin: .5em 0; padding: .3em .6em; border-left: 3px solid #FF9500; background: rgba(255, 149, 0, .12); }
+  #summary .item { margin: .45em 0; color: var(--white); }
+  #summary .item.off { color: var(--dim); }
+  #summary .item label { cursor: pointer; }
+  #summary .item input { margin-right: .6em; transform: scale(1.3); }
+  #summary .who { display: inline-block; min-width: 5.2em; margin-right: .5em; padding: 0 .4em; font-size: .75em; text-align: center; border: 1px solid rgba(238, 242, 244, .3); border-radius: .3em; color: var(--dim); }
+  #summary details { margin: .15em 0 0 2.2em; font-size: .85em; color: var(--dim); }
+  #summary summary { cursor: pointer; }
+  .board.after { grid-template-columns: minmax(0, 1fr); grid-template-areas: "say" "foot"; }
+  .board.after .agenda { display: none; }
   #summary .send { margin: .6em 0 0; padding: .2em .8em; font: inherit; color: var(--white); background: transparent; border: 1px solid rgba(238, 242, 244, .5); border-radius: .3em; cursor: pointer; }
   #past time { margin-right: .6em; font-variant-numeric: tabular-nums; color: var(--spent); }
   #stack.still, #stack.still * { transition: none !important; }   /* a joined board is correct on its first frame */
@@ -842,17 +850,34 @@
       back.addEventListener('click', hideSummary); box.append(back);
     }
     head(live ? 'Wrap-up so far' : 'Wrap-up', wrapup || 'No wrap-up came back.');
-    txt(wrapup || '');
+    for (const line of (wrapup || '').split('\n')) {   // "You said: ... In fact: ..." lines stand out: what to set straight
+      const d = document.createElement('div'); d.className = /^You said:/.test(line) ? 'txt fix' : 'txt'; d.textContent = line; box.append(d);
+    }
     for (const [lane, body] of Object.entries(packets || {})) {
       head('Action packet: ' + lane, body);
-      const ticks = [];
+      // each action item on one line, its reason folded: "N. [who] action. Why: source and evidence". Agent work starts
+      // ticked, a message to draft unticked; the user's own to-dos and other people's items have no box.
+      const ticks = [], WHO = { agent: 'agent', message: 'message', you: 'your to-do', others: 'others' };
       let rest = '';
       for (const line of body.split('\n')) {
-        if (/^\d+\.\s/.test(line)) {
-          txt(rest); rest = '';
-          const l = document.createElement('label'), cb = document.createElement('input');
-          cb.type = 'checkbox'; l.append(cb, line); box.append(l); ticks.push([cb, line]);
-        } else rest += line + '\n';
+        const m = line.match(/^(\d+\.)\s+(?:\[(agent|message|you|others)\]\s*)?(.*)$/i);
+        if (!m) { rest += line + '\n'; continue; }
+        txt(rest); rest = '';
+        const who = (m[2] || '').toLowerCase(), cut = m[3].search(/\s(Why|Source):\s/);
+        const row = document.createElement('div'); row.className = 'item' + (who === 'you' || who === 'others' ? ' off' : '');
+        const l = document.createElement('label');
+        if (who !== 'you' && who !== 'others') {
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = who === 'agent';
+          l.append(cb); ticks.push([cb, line]);
+        }
+        if (who) { const t = document.createElement('span'); t.className = 'who'; t.textContent = WHO[who]; l.append(t); }
+        l.append(m[1] + ' ' + (cut > 0 ? m[3].slice(0, cut) : m[3]));
+        row.append(l);
+        if (cut > 0) {
+          const d = document.createElement('details'), sm = document.createElement('summary');
+          sm.textContent = 'why'; d.append(sm, m[3].slice(cut + 1)); row.append(d);
+        }
+        box.append(row);
       }
       txt(rest);
       if (ticks.length) {
@@ -872,6 +897,7 @@
     n.textContent = live ? 'The call goes on; the final wrap-up comes when it ends.' : 'Saved with the meeting notes. Only the items you send reach a session.';
     box.append(n);
     stack.style.display = $('#earlier').style.display = 'none'; box.hidden = false;
+    board.classList.toggle('after', !live);   // after the call the agenda is over: the items get the full width
     scroller.scrollTop = 0;
   }
   function hideSummary() {

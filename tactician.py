@@ -75,9 +75,9 @@ When someone else is presenting or explaining (a demo, an architecture walkthrou
 
 Speed beats completeness: the right three words in ten seconds beat a paragraph in a minute. Project root: {root}. Lookup order: (1) `graphify query "<2-4 key terms>" --graph {root}/graphify-out/graph.json` when that file exists, then Read the best hit; (2) Grep across {root}/docs, {root}/_internal and the sibling folders you can read; (3) the digest and memory already in your context. At most three tool calls per slice, and only to look something up: never call a tool to wait or to do nothing (no `true`, `echo` or `sleep`); when there is nothing to post yet, reply "..." and the next slice arrives in seconds. You are read-only: never modify files or run anything that changes state.
 
-Reply to the [CONTEXT] message with the initial agenda: five to eight items, ranked, from the brief's call queue (items the project sessions want raised), its open commitments and anything due today. On "[MEETING ENDED]" reply in plain text, not JSON: a wrap-up of at most 8 lines, no bullets: what you flagged, commitments {user} made, which call-queue items were raised, open questions, and what to check after the call. Name who owns an action only when the transcript makes it certain; otherwise write "the room"."""
+Reply to the [CONTEXT] message with the initial agenda: five to eight items, ranked, from the brief's call queue (items the project sessions want raised), its open commitments and anything due today. On "[MEETING ENDED]" reply in plain text, not JSON: a wrap-up of at most 8 lines, no bullets: what you flagged, commitments {user} made, which call-queue items were raised, open questions, and what to check after the call. Then, for each thing {user} said on the call that the project context contradicts (a figure, date, status, scope, owner or term), one more line: "You said: <what they said, with time>. In fact: <the right fact>. Source: <document>." so they can set it straight with the room. Only a claim the transcript states clearly: never from a garbled or half-heard line, never one {user} corrected in their next lines, and none when they said nothing wrong. Name who owns an action only when the transcript makes it certain; otherwise write "the room"."""
 
-PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call touched, write an action packet for the session that works in that lane. Plain text, no JSON. One section per lane, each starting with a line "## <lane>" (the repo or lane, as the context names them; "general" for the rest). In each section: Decisions made on the call. Action items, numbered, each with its source document and the transcript evidence with time. Open questions and who answers them. Gaps in what {user} said that the artefacts should fix. Dates that bind. Write for an agent that will triage, gather the documents and propose, and must stop before anything client-facing or any commitment. Nothing for lanes the call did not touch."""
+PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call touched, write an action packet for the session that works in that lane. Plain text, no JSON. One section per lane, each starting with a line "## <lane>" (the repo or lane, as the context names them; "general" for the rest). In each section: Decisions made on the call. Action items, numbered, each on one line: "N. [who] <the action, at most 12 words>. Why: <its source document and the transcript evidence with time>", where who is agent (this lane's session can do it: look up, build, write a document, prepare), message (a message {user} sends; the session drafts it), you ({user} must do it in person) or others (someone else owns it; record only). Open questions and who answers them. Gaps in what {user} said that the artefacts should fix. Dates that bind. Write for an agent that will triage, gather the documents and propose, and must stop before anything client-facing or any commitment. Nothing for lanes the call did not touch."""
 
 
 def split_packets(text):
@@ -919,27 +919,34 @@ class Session:
         return True
 
     def send_items(self, lane, items):
-        """Items the user ticked on the end screen go to that lane's project session: config [sessions] maps the lane to a
-        cmux workspace title. One line, so the session's prompt takes it as one message; the packet holds the context.
-        Each send is recorded next to the packet. True when it was typed into the session."""
-        want, items = CONFIG.get("sessions", {}).get(lane), " | ".join(" ".join(i.split()) for i in items.splitlines() if i.strip())
-        if not (want and items and self.archive):
+        """Items the user ticked on the end screen go to that lane's project session: the cmux workspace whose folder is
+        the lane's (general: the project root), or the workspace title config [sessions] names when several share it.
+        One line, so the session's prompt takes it as one message; the packet holds the context. Each send is recorded
+        next to the packet. True when it was typed into the session."""
+        items = " | ".join(" ".join(i.split()) for i in items.splitlines() if i.strip())
+        if not (items and self.archive):
             return False
-        packet = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
-        msg = (f"Action items from the {self.archive.stem} call, approved by {USER}: {items} -- Context: {packet}. "
-               "Triage, gather what you need and propose; stop before anything client-facing or any commitment.")
-        env = {**os.environ, "CMUX_QUIET": "1"}
+        want, env = CONFIG.get("sessions", {}).get(lane), {**os.environ, "CMUX_QUIET": "1"}
+        here = lambda d: os.path.realpath(os.path.expanduser(d)).lower()  # case-insensitive disk, /var is /private/var
+        folders = {here(r if lane == "general" else r / lane) for r in ROOTS}
         try:
-            ws = subprocess.run(["cmux", "list-workspaces"], capture_output=True, text=True, timeout=10, env=env).stdout
-            ref = next(m.group() for line in ws.splitlines() if want in line for m in [re.search(r"workspace:\d+", line)] if m)
+            ws = json.loads(subprocess.run(["cmux", "workspace", "list", "--json"], capture_output=True, text=True, timeout=10, env=env).stdout)
+            ws = ws if isinstance(ws, list) else ws.get("workspaces", [])
+            hits = [w for w in ws if (want in str(w.get("title")) if want else here(w.get("current_directory") or "/-") in folders)]
+            if len(hits) != 1:  # none open, or several in one folder and no [sessions] entry to choose
+                return False
+            ref, name = hits[0]["ref"], hits[0].get("title")
+            packet = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
+            msg = (f"Action items from the {self.archive.stem} call, approved by {USER}: {items} -- Context: {packet}. "
+                   "Triage, gather what you need and propose; stop before anything client-facing or any commitment.")
             ok = all(subprocess.run(["cmux", *cmd], capture_output=True, timeout=10, env=env).returncode == 0
                      for cmd in (["send", "--workspace", ref, msg], ["send-key", "--workspace", ref, "enter"]))
-        except (StopIteration, OSError, subprocess.TimeoutExpired):
+        except (ValueError, KeyError, OSError, subprocess.TimeoutExpired):
             return False
         if ok:
             with self.archive.with_name(f"{self.archive.stem}-sent-{lane}.md").open("a") as f:
-                f.write(f"{now()} sent to {want} ({ref}):\n{msg}\n\n")
-            self.out(c("2", f"{now()} sent {lane} items to {want}"))
+                f.write(f"{now()} sent to {name} ({ref}):\n{msg}\n\n")
+            self.out(c("2", f"{now()} sent {lane} items to {name}"))
         return ok
 
     def linger(self, minutes=20):
