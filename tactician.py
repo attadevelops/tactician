@@ -59,6 +59,9 @@ SCREEN_S = 30  # how often the meeting window is looked at; an image goes to the
 CALL_WINDOW = re.compile(CONFIG.get("call_windows") or r"^Meet - |Zoom Meeting|Microsoft Teams|Huddle|Webex")  # window titles of a call
 # A read-only command over the tenant's source of truth (a second brain's CLI), which the session may run mid-call.
 LOOKUP = os.path.expanduser(CONFIG.get("lookup", ""))
+# A command run once a live call that heard the room has its wrap-up saved, with the wrap-up's path as its last argument
+# (a second brain's ingest). It runs detached, so the call's run can end; its output goes to logs/.
+AFTER_CALL = CONFIG.get("after_call", "")
 _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
 PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
@@ -597,6 +600,25 @@ def format_batch(rows):
     return ("[BACKLOG]\n" + text) if rows[0].get("backlog") else text
 
 
+# ---------------------------------------------------------------- after the call
+def after_call(wrapup, out):
+    """Start the config's after_call command on a saved wrap-up, detached from this run."""
+    if not AFTER_CALL:
+        return None
+    cmd = shlex.split(AFTER_CALL)
+    cmd = [os.path.expanduser(cmd[0]), *cmd[1:], str(wrapup)]
+    log = LOG_DIR / f"after-call-{wrapup.parent.name}-{wrapup.stem}.log"
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with log.open("w") as f:
+            p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:
+        out(c("33", f"{now()} after_call did not start ({e}); run it by hand: {shlex.join(cmd)}"))
+        return None
+    out(c("2", f"{now()} after_call started on the wrap-up; its output: {log}"))
+    return p
+
+
 # ---------------------------------------------------------------- the board page
 BOARD_HTML = Path(__file__).resolve().parent / "board" / "index.html"
 
@@ -1012,6 +1034,7 @@ class Session:
         return self.send(f"[USER] {line}", label=f"you asked: {line}")
 
     def send_transcript(self, rows):
+        self.heard = True
         text = format_batch(rows)
         for r in rows:
             self.out(c("2", f"  [{r['timestamp_label']}] {r['speaker']}: {r['text']}"), log_only=not self.show_transcript)
@@ -1078,6 +1101,8 @@ class Session:
             self.archive.parent.mkdir(parents=True, exist_ok=True)
             self.archive.write_text(f"{self.header}\n\n{self.wrapup}\n")
             self.out(c("2", f"{now()} wrap-up archived: {self.archive}"))
+            if getattr(self, "heard", False):  # a call no transcript reached has nothing for the source of truth
+                after_call(self.archive, self.out)
         self.out(c("2", f"{now()} done: {self.turns} turns, est. ${self.cost:.3f}; resume with: cd {self.cwd} && claude --resume {self.session_id}"))
         saved = bool(self.wrapup and self.archive)  # the board's last word: it shows the wrap-up and packets, End just closes it
         self.set_rec("done", saved=saved, **({"wrapup": self.wrapup, "packets": packets} if saved else {}))

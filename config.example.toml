@@ -27,6 +27,9 @@ stop_shortcut = "Tactician Stop Meeting"
 # A read-only command over your source of truth (e.g. a second brain's CLI wrapper that only allows read subcommands).
 # The call session may run it mid-call for current status, deployments and who is waiting; it is never given write access.
 # lookup = "~/notes/brain/read-only-cli"
+# A command run when a live call that heard the room has saved its wrap-up, with the wrap-up's path as its last
+# argument (e.g. a second brain's ingest). It runs detached; its output goes to logs/after-call-*.log.
+# after_call = "~/notes/brain/ingest-call"
 
 # Send on the board after a call goes to the cmux session whose folder is the lane's (general: the project root). Only a
 # folder with several sessions needs an entry: lane = the workspace title to use.

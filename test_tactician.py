@@ -282,3 +282,14 @@ assert got[0].startswith("[") and " lane-a] " in got[0], got
 assert la.agent_activity(["/x/rv"], t0, until=t1, limit=len(got[-1])) == got[-1]  # over the limit: the newest survive
 assert la.agent_activity(["/x/rv"], t1).endswith("Alex: after the call")
 print("agent sessions ok")
+
+# after the call: the saved wrap-up goes to the after_call command, detached, with its path as the last argument
+import stat as _st
+call = la.MEETINGS_DIR / "rv" / "2026-10-19-0900.md"; call.parent.mkdir(parents=True, exist_ok=True); call.write_text("wrap-up")
+fake = tmp / "ingest"; calls = tmp / "ingest-calls"
+fake.write_text(f"#!/bin/sh\necho \"$*\" >> {calls}\n"); fake.chmod(fake.stat().st_mode | _st.S_IEXEC)
+la.AFTER_CALL, la.LOG_DIR = f"{fake} --quiet", tmp / "logs"; out = []
+la.after_call(call, out.append).wait()
+assert calls.read_text().strip() == f"--quiet {call}" and "after_call started" in out[0], out
+la.AFTER_CALL = ""; assert la.after_call(call, out.append) is None
+print("after the call ok")
