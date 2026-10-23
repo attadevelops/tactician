@@ -59,6 +59,14 @@ assert "s1" not in s.items and s.items["a2"]["rank"] == 1 and s.board_line() == 
 assert [e["kind"] for e in s.events] == ["add", "agenda", "agenda", "agenda", "agenda", "done"], [e["kind"] for e in s.events]
 assert s.items["a1"]["rank"] == 2, s.items
 s._note('{"say": [{"lines": ["old"], "importance": 1}]}'); s.items["s2"]["born"] -= 300; s.expire(); assert "s2" not in s.items
+# notes: a second list, shown under Say; same ids and lifecycle, never red, logged and listed as notes
+n = fake()
+n._note('{"say": [{"lines": ["Yes, same code for every client"], "importance": 2}], '
+        '"note": [{"lines": ["Prod stays one project per client"], "importance": 3, "source": "brief"}, {"lines": ["a"]}, {"lines": ["b"]}]}')
+assert n.items["s2"]["note"] and n.items["s2"]["importance"] == 2 and "note" not in n.items["s1"] and "s4" not in n.items, n.items
+assert "NOTE: [2] s2 (notes pane) Prod stays one project per client (brief)" in "".join(n.log.lines), n.log.lines
+assert n.board_line().startswith('[BOARD] say: s1 "Yes, same code for every client", s2 (note) "Prod stays'), n.board_line()
+n.items["s2"]["born"] -= 300; n.expire(); assert "s2" not in n.items and "s1" in n.items
 assert la.parse_items("...") is None and la.parse_items("NOTE: x") is None and la.parse_items("[1]") is None
 # a raised agenda item stays, struck through: out of the ranking, listed as raised, reopened by a re-rank
 s._note('{"done": ["a2"]}')

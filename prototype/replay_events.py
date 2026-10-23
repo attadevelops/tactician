@@ -68,7 +68,7 @@ def apply(open_items, e, born):
     """What Session.items would hold after event e."""
     if e["kind"] == "add":
         open_items[e["id"]] = {"id": e["id"], "pane": "say", "lines": e["lines"], "source": e["source"],
-                               "importance": e["importance"], "born": born}
+                               "importance": e["importance"], "born": born, **({"note": True} if e.get("note") else {})}
     elif e["kind"] == "agenda":
         open_items[e["id"]] = {"id": e["id"], "pane": "agenda", "text": e["text"], "rank": e["rank"], "born": born}
     elif e["kind"] in ("done", "expire") and e.get("pane") == "agenda" and e["id"] in open_items:
