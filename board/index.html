@@ -838,10 +838,12 @@
   function showSummary(wrapup, packets, live) {
     const box = $('#summary');
     box.replaceChildren();
+    // text: a string, or a function read at click time (a packet copies its ticked items, or all of it with none ticked)
     const head = (title, text) => {
       const h = document.createElement('h2'); h.textContent = title;
       const b = document.createElement('button'); b.type = 'button'; b.textContent = 'Copy';
-      b.addEventListener('click', () => navigator.clipboard.writeText(text).then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Copy failed'; }));
+      b.addEventListener('click', () => Promise.resolve(typeof text === 'function' ? text() : text)
+        .then((t) => navigator.clipboard.writeText(t)).then(() => { b.textContent = 'Copied'; }, () => { b.textContent = 'Copy failed'; }));
       h.append(b); box.append(h);
     };
     const txt = (t) => { if (t.trim()) { const d = document.createElement('div'); d.className = 'txt'; d.textContent = t; box.append(d); } };
@@ -854,15 +856,19 @@
       const d = document.createElement('div'); d.className = /^You said:/.test(line) ? 'txt fix' : 'txt'; d.textContent = line; box.append(d);
     }
     for (const [lane, body] of Object.entries(packets || {})) {
-      head('Action packet: ' + lane, body);
+      // Copy gives the handoff Send would type, as lines: the ticked items, or every item when none is ticked
+      const ticks = [], all = [];
+      head('Action packet: ' + lane, () => fetch('/prompt', { method: 'POST', body: JSON.stringify({ token: TOKEN, lane,
+        items: (ticks.filter(([cb]) => cb.checked).map(([, line]) => line).join('\n') || all.join('\n')) }) })
+        .then((r) => r.ok ? r.text() : '').then((t) => t || body));
       // each action item on one line, its reason folded: "N. [who] action. Why: source and evidence". Agent work starts
       // ticked, a message to draft unticked; the user's own to-dos and other people's items have no box.
-      const ticks = [], WHO = { agent: 'agent', message: 'message', you: 'your to-do', others: 'others' };
+      const WHO = { agent: 'agent', message: 'message', you: 'your to-do', others: 'others' };
       let rest = '';
       for (const line of body.split('\n')) {
         const m = line.match(/^(\d+\.)\s+(?:\[(agent|message|you|others)\]\s*)?(.*)$/i);
         if (!m) { rest += line + '\n'; continue; }
-        txt(rest); rest = '';
+        txt(rest); rest = ''; all.push(line);
         const who = (m[2] || '').toLowerCase(), cut = m[3].search(/\s(Why|Source):\s/);
         const row = document.createElement('div'); row.className = 'item' + (who === 'you' || who === 'others' ? ' off' : '');
         const l = document.createElement('label');
@@ -887,8 +893,12 @@
           if (!items) { b.textContent = 'Tick at least one item'; return; }
           b.disabled = true; b.textContent = 'Sending…';
           fetch('/send', { method: 'POST', body: JSON.stringify({ token: TOKEN, lane, items }) })
-            .then((r) => { if (!r.ok) throw new Error(r.status); b.textContent = 'Sent to the ' + lane + ' session'; })
-            .catch(() => { b.disabled = false; b.textContent = 'Not sent: no open session for ' + lane + ' (config [sessions]); use Copy'; });
+            .then((r) => r.ok ? '' : r.text().then((why) => why || 'error ' + r.status))
+            .catch(() => 'Tactician is not running')
+            .then((why) => {
+              b.disabled = !why;
+              b.textContent = why ? 'Not sent: ' + why + '. Send again, or Copy the ticked items' : 'Sent to the ' + lane + ' session';
+            });
         });
         box.append(b);
       }

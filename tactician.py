@@ -62,6 +62,9 @@ LOOKUP = os.path.expanduser(CONFIG.get("lookup", ""))
 # A command run once a live call that heard the room has its wrap-up saved, with the wrap-up's path as its last argument
 # (a second brain's ingest). It runs detached, so the call's run can end; its output goes to logs/.
 AFTER_CALL = CONFIG.get("after_call", "")
+# cmux types approved action items into a lane's session. A run started from the menu bar has SwiftBar's bare PATH,
+# which lacks the app's own bin folder.
+CMUX = shutil.which("cmux") or "/Applications/cmux.app/Contents/Resources/bin/cmux"
 _LINE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ([^:\]]+): ?(.*)$")
 
 PROMPT = """You are Tactician, {user}'s live meeting prompter. You run headless for the call happening right now. {user} is in the call and reads a board on a side monitor: a Say pane (the words to say now) and an Agenda pane (what to raise, ranked). They have no time to read explanations: give them the words, in plain short lines, and decide how loud they need to be.
@@ -80,7 +83,7 @@ Speed beats completeness: the right three words in ten seconds beat a paragraph 
 
 Reply to the [CONTEXT] message with the initial agenda: five to eight items, ranked, from the brief's call queue (items the project sessions want raised), its open commitments and anything due today. On "[MEETING ENDED]" reply in plain text, not JSON: a wrap-up of at most 8 lines, no bullets: what you flagged, commitments {user} made, which call-queue items were raised, open questions, and what to check after the call. Then, for each thing {user} said on the call that the project context contradicts (a figure, date, status, scope, owner or term), one more line: "You said: <what they said, with time>. In fact: <the right fact>. Source: <document>." so they can set it straight with the room. Only a claim the transcript states clearly: never from a garbled or half-heard line, never one {user} corrected in their next lines, and none when they said nothing wrong. Name who owns an action only when the transcript makes it certain; otherwise write "the room"."""
 
-PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call touched, write an action packet for the session that works in that lane. Plain text, no JSON. One section per lane, each starting with a line "## <lane>" (the repo or lane, as the context names them; "general" for the rest). In each section: Decisions made on the call. Action items, numbered, each on one line: "N. [who] <the action, at most 12 words>. Why: <its source document and the transcript evidence with time>", where who is agent (this lane's session can do it: look up, build, write a document, prepare), message (a message {user} sends; the session drafts it), you ({user} must do it in person) or others (someone else owns it; record only). Open questions and who answers them. Gaps in what {user} said that the artefacts should fix. Dates that bind. Write for an agent that will triage, gather the documents and propose, and must stop before anything client-facing or any commitment. Nothing for lanes the call did not touch."""
+PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call touched, write an action packet for the session that works in that lane. Plain text, no JSON. One section per lane, each starting with a line "## <lane>" (the repo or lane, as the context names them; "general" for the rest). In each section: Decisions made on the call. Action items, numbered, the work the call itself discussed first (every bug seen, fix, improvement, investigation or change someone asked for or agreed to, with enough detail that someone who missed the call can act on it), then leftovers from the brief only if they still apply, each on one line: "N. [who] <the action, at most 12 words>. Why: <its source document and the transcript evidence with time>", where who is agent (this lane's session can do it: look up, build, write a document, prepare), message (a message {user} sends; the session drafts it), you ({user} must do it in person) or others (someone else owns it; record only). Open questions and who answers them. Gaps in what {user} said that the artefacts should fix. Dates that bind. Write for an agent that will triage, gather the documents and propose, and must stop before anything client-facing or any commitment. Nothing for lanes the call did not touch."""
 
 
 def split_packets(text):
@@ -640,7 +643,8 @@ class BoardHandler(http.server.BaseHTTPRequestHandler):
         """/ask {token, q, id, text}: a question typed on the board, or about item id; answered as a say item.
         /mark {token, id, verdict, note}: done retires item id as the model would, wrong takes it off and tells the model why.
         /stop {token}: the board's End button. /record {token}: the banner's Start recording button.
-        /send {token, lane, items}: ticked action items to that lane's session. /close {token}: the board closed after the call.
+        /send {token, lane, items}: ticked action items to that lane's session (409 and the reason when not sent).
+        /prompt {token, lane, items}: the same handoff as text, for Copy. /close {token}: the board closed after the call.
         /wrapup {token}: the wrap-up and packets so far, while the call goes on."""
         try:
             d = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8000)))
@@ -654,9 +658,19 @@ class BoardHandler(http.server.BaseHTTPRequestHandler):
                "/wrapup": lambda: self.session.checkpoint(),
                "/close": lambda: self.session.closed.set() or True,
                "/record": lambda: self.session.rec["can_start"] and start_recording(self.session.title)}.get(self.path)
-        ok = (act and self._local() and isinstance(d, dict)
-              and secrets.compare_digest(get("token").encode(), self.token.encode()) and act())
-        self.send_response(204 if ok else 403)
+        allowed = (act or self.path == "/prompt") and self._local() and isinstance(d, dict) and secrets.compare_digest(
+            get("token").encode(), self.token.encode())
+        # text answers: /prompt the handoff for Copy; /send, when it did not send, why not
+        text = (self.session.handoff(get("lane"), get("items")) if self.path == "/prompt" else act()) if allowed else False
+        if allowed and self.path in ("/prompt", "/send"):
+            code, body = (204, b"") if self.path == "/send" and not text else (200 if self.path == "/prompt" else 409, str(text).encode())
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(204 if text else 403)
         self.end_headers()
 
     def do_GET(self):
@@ -940,36 +954,58 @@ class Session:
             threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGINT)).start()
         return True
 
-    def send_items(self, lane, items):
-        """Items the user ticked on the end screen go to that lane's project session: the cmux workspace whose folder is
-        the lane's (general: the project root), or the workspace title config [sessions] names when several share it.
-        One line, so the session's prompt takes it as one message; the packet holds the context. Each send is recorded
-        next to the packet. True when it was typed into the session."""
-        items = " | ".join(" ".join(i.split()) for i in items.splitlines() if i.strip())
+    def handoff(self, lane, items, one_line=False):
+        """The prompt a lane's session gets for the ticked items: who approved them, the items, where the context is
+        and the ground rules. One line for Send, so the session's prompt takes it as one message; lines for Copy."""
+        items = [" ".join(i.split()) for i in items.splitlines() if i.strip()]
         if not (items and self.archive):
-            return False
+            return ""
+        packet = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
+        head = f"Action items from the {self.archive.stem} call ({lane}), approved by {USER}:"
+        ctx = f"Context: the action packet {packet}, the wrap-up {self.archive} and the call's transcript in {self.log.name}."
+        rules = ("First check whether someone already has an item in hand (open branches, pull requests, issues, recent "
+                 "commits) and skip it. For the rest: investigate, gather what you need and propose; stop before "
+                 "anything client-facing, any deploy or any commitment.")
+        return (f"{head} {' | '.join(items)} -- {ctx} {rules}" if one_line
+                else f"{head}\n" + "\n".join(items) + f"\n\n{ctx}\n\n{rules}\n")
+
+    def send_items(self, lane, items):
+        """Items the user ticked on the end screen go to that lane's project session: the cmux workspace in the lane's
+        folder (general: the project root) or below it, or the workspace title config [sessions] names. Looked up on
+        every click, so a session opened after a failed Send is found. Each send is recorded next to the packet.
+        '' when it was typed into the session, else why not, for the board to show."""
+        msg = self.handoff(lane, items, one_line=True)
+        if not msg:
+            return "no items, or no saved wrap-up yet"
         want, env = CONFIG.get("sessions", {}).get(lane), {**os.environ, "CMUX_QUIET": "1"}
         here = lambda d: os.path.realpath(os.path.expanduser(d)).lower()  # case-insensitive disk, /var is /private/var
         folders = {here(r if lane == "general" else r / lane) for r in ROOTS}
+        cmux = lambda *a: subprocess.run([CMUX, *a], capture_output=True, text=True, timeout=10, env=env)
         try:
-            ws = json.loads(subprocess.run(["cmux", "workspace", "list", "--json"], capture_output=True, text=True, timeout=10, env=env).stdout)
+            ws = json.loads(cmux("workspace", "list", "--json").stdout)
             ws = ws if isinstance(ws, list) else ws.get("workspaces", [])
-            hits = [w for w in ws if (want in str(w.get("title")) if want else here(w.get("current_directory") or "/-") in folders)]
-            if len(hits) != 1:  # none open, or several in one folder and no [sessions] entry to choose
-                return False
+            cwd = lambda w: here(w.get("current_directory") or "/-")
+            hits = ([w for w in ws if want in str(w.get("title"))] if want else
+                    [w for w in ws if cwd(w) in folders]  # the lane's folder itself, else a session in a repo below it
+                    or [w for w in ws if any(cwd(w).startswith(f + "/") for f in folders)])
+            if len(hits) != 1:  # none open, or several and no [sessions] entry to choose
+                return (f"{len(hits)} sessions in the {lane} folder; name one in config [sessions]" if hits
+                        else f"no open session in the {lane} folder; open one and Send again")
             ref, name = hits[0]["ref"], hits[0].get("title")
-            packet = self.archive.with_name(f"{self.archive.stem}-packet-{lane}.md")
-            msg = (f"Action items from the {self.archive.stem} call, approved by {USER}: {items} -- Context: {packet}. "
-                   "Triage, gather what you need and propose; stop before anything client-facing or any commitment.")
-            ok = all(subprocess.run(["cmux", *cmd], capture_output=True, timeout=10, env=env).returncode == 0
-                     for cmd in (["send", "--workspace", ref, msg], ["send-key", "--workspace", ref, "enter"]))
-        except (ValueError, KeyError, OSError, subprocess.TimeoutExpired):
-            return False
-        if ok:
-            with self.archive.with_name(f"{self.archive.stem}-sent-{lane}.md").open("a") as f:
-                f.write(f"{now()} sent to {name} ({ref}):\n{msg}\n\n")
-            self.out(c("2", f"{now()} sent {lane} items to {name}"))
-        return ok
+            r = cmux("send", "--workspace", ref, msg)
+            if r.returncode == 0:
+                r = cmux("send-key", "--workspace", ref, "enter")
+        except FileNotFoundError:
+            return f"cmux not found at {CMUX}"
+        except (ValueError, KeyError, OSError, subprocess.TimeoutExpired) as e:
+            return f"cmux failed: {e}"
+        if r.returncode:  # e.g. the session is waiting on a question: cmux refuses rather than type into it
+            why = (r.stderr or r.stdout).strip().splitlines()
+            return f"{name}: " + (re.sub(r"^Error:\s*(send:\s*)?\S+ ", "", why[0]) if why else "cmux send failed")
+        with self.archive.with_name(f"{self.archive.stem}-sent-{lane}.md").open("a") as f:
+            f.write(f"{now()} sent to {name} ({ref}):\n{msg}\n\n")
+        self.out(c("2", f"{now()} sent {lane} items to {name}"))
+        return ""
 
     def linger(self, minutes=20):
         """After a saved wrap-up the board stays served, so its Send buttons work, until Close window, Stop in the menu
