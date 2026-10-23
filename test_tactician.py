@@ -293,3 +293,26 @@ la.after_call(call, out.append).wait()
 assert calls.read_text().strip() == f"--quiet {call}" and "after_call started" in out[0], out
 la.AFTER_CALL = ""; assert la.after_call(call, out.append) is None
 print("after the call ok")
+
+# Send and Copy: the handoff names the call, the items and the context; Send finds the lane's session on every click
+# (a session opened after a failed Send is found), in the lane's folder or a repo below it, and says why when it cannot
+s = la.Session.__new__(la.Session); s.log = FakeOut(); s.log.name = str(tmp / "logs" / "run.md"); s.archive = call
+copy = s.handoff("lane-a", "1. [agent] Fix the balance\n\n2. [message] Ask Sam")
+assert copy.startswith("Action items from the 2026-10-19-0900 call (lane-a), approved by Alex:\n1. [agent] Fix the balance\n2.") \
+    and "2026-10-19-0900-packet-lane-a.md" in copy and "already has an item in hand" in copy, copy
+assert "\n" not in s.handoff("lane-a", "1. a\n2. b", one_line=True) and s.handoff("lane-a", " \n") == ""
+ws, sent = tmp / "ws.json", tmp / "cmux-sent"
+cm = tmp / "cmux"; cm.write_text(f"#!/bin/sh\ncase \"$1\" in workspace) cat {ws};; send) [ -f {tmp}/busy ] && "
+                                 f"{{ echo 'Error: send: ABC-1 is waiting on a question or dialog, so nothing was sent.' >&2; exit 1; }}; "
+                                 f"echo \"$*\" >> {sent};; esac\n")
+cm.chmod(cm.stat().st_mode | _st.S_IEXEC); la.CMUX = str(cm)
+ws.write_text('[{"ref": "workspace:1", "title": "Other", "current_directory": "/elsewhere"}]')
+assert s.send_items("lane-a", "1. x") == "no open session in the lane-a folder; open one and Send again"
+ws.write_text(f'[{{"ref": "workspace:2", "title": "A", "current_directory": "{rv / "lane-a" / "repo"}"}}]')  # opened since
+(tmp / "busy").write_text("")
+assert s.send_items("lane-a", "1. x") == "A: is waiting on a question or dialog, so nothing was sent."
+(tmp / "busy").unlink()
+assert s.send_items("lane-a", "1. x") == "" and "send --workspace workspace:2 Action items" in sent.read_text()
+assert "sent to A (workspace:2)" in (call.parent / "2026-10-19-0900-sent-lane-a.md").read_text()
+la.CMUX = str(tmp / "no-such-cmux"); assert s.send_items("lane-a", "1. x").startswith("cmux not found")
+print("send and copy ok")
