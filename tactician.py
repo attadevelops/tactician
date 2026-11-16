@@ -88,9 +88,9 @@ PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call tou
 
 
 CHAT_PROMPT = """[CHAT] lines are new messages in the meeting's text chat, read from the chat panel as plain text: a message usually shows its sender, who it went to and the time, in no fixed layout; a line in brackets was already there and is only context (often the sender's name). A [SCREEN] of a window titled like a chat is the chat panel itself: read its messages the same way. {user} is presenting and cannot watch the chat, so you watch it for them and never make them stop for it.
-A question or request in the chat (also one put as a statement that wants an answer: "not sure how X handles Y") is held: post one "note" with "chat": true. Its lines: first "<first name> asked: <the question, at most 10 words>", then the answer {user} could give, one or two lines of at most 12 words, grounded like any say item, in the words your context prescribes when it does not settle the point; source "chat <time>". One note per question; never post it again. Not questions, never posted: answers to a poll or to {user}'s own question to the room (a letter, Y or N, yes, a number, one word), greetings, thanks, reactions, joins, Zoom's own system lines and {user}'s own messages.
+A question or request in the chat (also one put as a statement that wants an answer: "not sure how X handles Y") is held: put one item in a "note" list next to "say" in your JSON ({"note": [{"lines": [...], "chat": true, "source": "chat 10:05"}]}), never in "say": notes sit quietly under the Say pane. Its lines: first "<first name> asked: <the question, at most 10 words>", then the answer {user} could give, one or two lines of at most 12 words, grounded like any say item, in the words your context prescribes when it does not settle the point; source "chat <time>". One note per question; never post it again. Not questions, never posted: answers to a poll or to {user}'s own question to the room (a letter, Y or N, yes, a number, one word), greetings, thanks, reactions, joins, Zoom's own system lines and {user}'s own messages.
 A held question waits: never interrupt a topic for it. Raise it only when the transcript reaches its topic, or at a natural pause ({user} asks for questions, a break, the end of a section, a question stop in the plan): then retire its note and post one say item with "chat": true, importance 2, first line "Good moment: <first name> asked <the gist>", then the answer. At most one such nudge open at a time; the rest stay held, and a question already answered by {user} in passing is retired, not raised.
-When {user} answers a chat question (the transcript shows them addressing it, or reading it out), retire its note or nudge and post once a say item, importance 1, no chat flag: "Check with <first name>: did that answer your question?". When someone else answers it well in the chat, retire it without a check. Chat items are never importance 3. Use the sender's first name as the chat shows it, never a guess."""
+When {user} answers a chat question (the transcript shows them taking up that question itself: naming the asker, reading it out, or answering its specific point; talking about its general topic is not answering it), retire its note or nudge and post once a say item, importance 1, no chat flag: "Check with <first name>: did that answer your question?". When someone else answers it well in the chat, retire it without a check. Chat items are never importance 3. Use the sender's first name as the chat shows it, never a guess."""
 
 
 def split_packets(text):
@@ -1083,12 +1083,18 @@ class Session:
 
     def _apply(self, obj):
         says = [it for it in (obj.get("say") or []) if isinstance(it, dict)]
+        # a held chat question is a quiet note whichever list the model put it in (replays posted them as say items);
+        # only its "Good moment" nudge is said
+        held = [it for it in says if it.get("chat") and not str((it.get("lines") or [""])[0]).lower().startswith("good moment")]
+        says = [it for it in says if not any(it is h for h in held)]
         # three a reply, loudest first: on 2026-10-16 two answers posted 5 and 6 items, too many to read, all gone together
         says = sorted(says, key=lambda it: -max(1, min(3, int(it.get("importance") or 1))))[:SAY_MAX]
         answer, self.answering = getattr(self, "answering", False) and bool(says), False
         # notes share the say ids and lifecycle; the board shows them under Say, smaller: never read aloud, never red
         notes = [{**it, "importance": min(2, int(it.get("importance") or 1)), "note": True}
-                 for it in (obj.get("note") or []) if isinstance(it, dict)][:NOTE_MAX]
+                 for it in (obj.get("note") or []) if isinstance(it, dict)]
+        notes = [n for n in notes if not n.get("chat")][:NOTE_MAX] + [n for n in notes if n.get("chat")] + [
+            {**it, "importance": min(2, int(it.get("importance") or 1)), "note": True} for it in held]  # every chat question
         for it in says + notes:
             lines = [str(l).strip() for l in (it.get("lines") or []) if str(l).strip()][:3]
             if not lines:

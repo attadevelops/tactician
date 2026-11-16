@@ -370,5 +370,8 @@ s._note('{"note": [{"lines": ["Sam asked: does it post?", "No: it drafts, you po
 q = f"s{s.n_say}"; s.items[q]["born"] -= 1800; s.expire()
 assert q in s.items and f'{q} (note) (chat) "Sam asked: does it post?' in s.board_line(), s.board_line()
 s.items[q]["born"] -= 1801; s.expire(); assert q not in s.items
+s._note('{"say": [{"lines": ["Kim asked: is it on Team?", "Yes"], "chat": true}, {"lines": ["Good moment: Sam asked about posting"], "chat": true, "importance": 2}]}')
+held, nudge = s.items[f"s{s.n_say}"], s.items[f"s{s.n_say - 1}"]  # a held question is a note even when posted as say
+assert held["note"] and held["lines"][0].startswith("Kim") and "note" not in nudge and nudge["importance"] == 2, (held, nudge)
 assert "{user}" not in la.CHAT_PROMPT.replace("{user}", "Alex") and "—" not in la.CHAT_PROMPT
 print("zoom chat ok")
