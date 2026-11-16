@@ -87,6 +87,12 @@ Reply to the [CONTEXT] message with the initial agenda: five to eight items, ran
 PACKETS_MSG = """[PACKETS] The call is over. For each project lane this call touched, write an action packet for the session that works in that lane. Plain text, no JSON. One section per lane, each starting with a line "## <lane>" (the repo or lane, as the context names them; "general" for the rest). In each section: Decisions made on the call. Action items, numbered, the work the call itself discussed first (every bug seen, fix, improvement, investigation or change someone asked for or agreed to, with enough detail that someone who missed the call can act on it), then leftovers from the brief only if they still apply, each on one line: "N. [who] [i1] <the action, at most 12 words>. Why: <its source document and the transcript evidence with time>", where the importance marker is [i1] normally, [i2] for a near deadline or something others wait on, [i3] only for a blocker or a serious risk the Why states, and who is agent (this lane's session can do it: look up, build, write a document, prepare), message (a message {user} sends; the session drafts it), you ({user} must do it in person) or others (someone else owns it; record only). Open questions and who answers them. Gaps in what {user} said that the artefacts should fix. Dates that bind. Write for an agent that will triage, gather the documents and propose, and must stop before anything client-facing or any commitment. Nothing for lanes the call did not touch."""
 
 
+CHAT_PROMPT = """[CHAT] lines are new messages in the meeting's text chat, read from the chat panel as plain text: a message usually shows its sender, who it went to and the time, in no fixed layout; a line in brackets was already there and is only context (often the sender's name). A [SCREEN] of a window titled like a chat is the chat panel itself: read its messages the same way. {user} is presenting and cannot watch the chat, so you watch it for them and never make them stop for it.
+A question or request in the chat (also one put as a statement that wants an answer: "not sure how X handles Y") is held: post one "note" with "chat": true. Its lines: first "<first name> asked: <the question, at most 10 words>", then the answer {user} could give, one or two lines of at most 12 words, grounded like any say item, in the words your context prescribes when it does not settle the point; source "chat <time>". One note per question; never post it again. Not questions, never posted: answers to a poll or to {user}'s own question to the room (a letter, Y or N, yes, a number, one word), greetings, thanks, reactions, joins, Zoom's own system lines and {user}'s own messages.
+A held question waits: never interrupt a topic for it. Raise it only when the transcript reaches its topic, or at a natural pause ({user} asks for questions, a break, the end of a section, a question stop in the plan): then retire its note and post one say item with "chat": true, importance 2, first line "Good moment: <first name> asked <the gist>", then the answer. At most one such nudge open at a time; the rest stay held, and a question already answered by {user} in passing is retired, not raised.
+When {user} answers a chat question (the transcript shows them addressing it, or reading it out), retire its note or nudge and post once a say item, importance 1, no chat flag: "Check with <first name>: did that answer your question?". When someone else answers it well in the chat, retire it without a check. Chat items are never importance 3. Use the sender's first name as the chat shows it, never a guess."""
+
+
 def split_packets(text):
     """'## lane' sections of the packets reply -> {slug: body}."""
     out, lane = {}, None
@@ -115,8 +121,11 @@ MEETINGS_DIR = HOME / "meetings"  # archived wrap-ups, one file per live meeting
 DIGESTS_DIR = HOME / "digests"  # the channel readers' rolling digests, one per channel (skills/tactician-read), newest first
 
 
+CONTEXT_NAME = None  # --context: contexts/<name>.md alone, instead of the project folder's own context maps
+
+
 def _context_lines(project):
-    for name in (project.parent.name, project.name):
+    for name in ((CONTEXT_NAME,) if CONTEXT_NAME else (project.parent.name, project.name)):
         f = CONTEXT_DIR / f"{name}.md"
         if f.exists():
             yield from f.read_text().splitlines()
@@ -371,9 +380,10 @@ def write_shortcut(name, action):
     print(f"In Shortcuts: Add Shortcut ('{name}'). On its first run choose Always Allow, so it can reach Muesli.")
 
 
-def call_window():
-    """(window id, title) of the on-screen meeting window, from CoreGraphics' window list; (None, reason) when there is none.
-    Titles are hidden without Screen Recording permission, so no titles at all means no permission."""
+def call_window(pattern=None):
+    """(window id, title) of the on-screen meeting window (or Zoom's first window matching `pattern`), from CoreGraphics' window
+    list; (None, reason) when there is none. Titles are hidden without Screen Recording permission, so no titles at all
+    means no permission."""
     import ctypes, ctypes.util
     V = ctypes.c_void_p
     cg, cf = ctypes.CDLL(ctypes.util.find_library("CoreGraphics")), ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
@@ -396,7 +406,7 @@ def call_window():
             d = cf.CFArrayGetValueAtIndex(arr, i)
             owner, title = text(cf.CFDictionaryGetValue(d, k_owner)), text(cf.CFDictionaryGetValue(d, k_name))
             titled |= bool(title) and owner not in ("Window Server", "Control Center", "Dock")
-            if title and CALL_WINDOW.search(title):
+            if title and (pattern or CALL_WINDOW).search(title) and (not pattern or "zoom" in owner.lower()):
                 n = ctypes.c_int64()
                 cf.CFNumberGetValue(cf.CFDictionaryGetValue(d, k_num), 4, ctypes.byref(n))
                 return n.value, title
@@ -422,6 +432,228 @@ def capture_window(wid, path):
 def changed(a, b, threshold=8):
     """Mean per-byte difference of two fingerprints above threshold: the shared screen moved on (a new slide, a scroll)."""
     return a is None or b is None or len(a) != len(b) or sum(abs(x - y) for x, y in zip(a, b)) / len(a) > threshold
+
+
+# ---------------------------------------------------------------- Zoom chat (read-only, through Accessibility)
+CHAT_S = 10  # how often the Zoom chat is read (--zoom-chat)
+CHAT_AGE = 3600  # a chat question on the board waits this long for its moment before it expires
+CHAT_WINDOW = re.compile(r"chat", re.I)  # a Zoom window of its own for the chat: popped out, or floating while sharing
+_ROW_TEXT = ("AXStaticText", "AXLink", "AXGroup", "AXCell", "AXHeading")  # text that belongs to one chat message row
+
+
+def ax_trusted():
+    import ctypes, ctypes.util
+    ax = ctypes.CDLL(ctypes.util.find_library("ApplicationServices"))
+    ax.AXIsProcessTrusted.restype = ctypes.c_bool
+    return ax.AXIsProcessTrusted()
+
+
+def zoom_pids():
+    """The Zoom desktop app's processes that can own windows (the app, and a meeting process if it runs one)."""
+    try:
+        ps = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [int(p) for p, cmd in (l.strip().split(" ", 1) for l in ps.splitlines() if " " in l.strip())
+            if "/zoom.us.app/Contents/" in cmd and "Helper" not in cmd]
+
+
+def ax_windows(pid, budget=4000, deadline=3.0):
+    """Every window of a process as (title, nodes), nodes in screen-reader order as (depth, role, title, value,
+    description). Read-only: attributes are only copied, never set, and each call gives up after a second, so a busy
+    Zoom is never held up. ponytail: a node budget and a deadline bound one read; a cut tree just reads as fewer lines."""
+    import ctypes, ctypes.util
+    V = ctypes.c_void_p
+    ax, cf = ctypes.CDLL(ctypes.util.find_library("ApplicationServices")), ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
+    ax.AXUIElementCreateApplication.restype, ax.AXUIElementCreateApplication.argtypes = V, [ctypes.c_int]
+    ax.AXUIElementCopyAttributeValue.restype, ax.AXUIElementCopyAttributeValue.argtypes = ctypes.c_int32, [V, V, ctypes.POINTER(V)]
+    ax.AXUIElementSetMessagingTimeout.argtypes = [V, ctypes.c_float]
+    cf.CFStringCreateWithCString.restype, cf.CFStringCreateWithCString.argtypes = V, [V, ctypes.c_char_p, ctypes.c_uint32]
+    cf.CFGetTypeID.restype, cf.CFGetTypeID.argtypes = ctypes.c_ulong, [V]
+    cf.CFStringGetTypeID.restype = cf.CFArrayGetTypeID.restype = ctypes.c_ulong
+    cf.CFArrayGetCount.restype, cf.CFArrayGetCount.argtypes = ctypes.c_long, [V]
+    cf.CFArrayGetValueAtIndex.restype, cf.CFArrayGetValueAtIndex.argtypes = V, [V, ctypes.c_long]
+    cf.CFStringGetCString.argtypes = [V, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+    cf.CFRelease.argtypes = [V]
+    keys = {k: cf.CFStringCreateWithCString(None, k.encode(), 0x08000100)
+            for k in ("AXWindows", "AXChildren", "AXRole", "AXTitle", "AXValue", "AXDescription")}
+    STR, ARR, buf = cf.CFStringGetTypeID(), cf.CFArrayGetTypeID(), ctypes.create_string_buffer(16384)
+
+    def copy(el, k):
+        out = V()
+        return out.value if ax.AXUIElementCopyAttributeValue(el, keys[k], ctypes.byref(out)) == 0 and out.value else None
+
+    def text(el, k):
+        v = copy(el, k)
+        if v is None:
+            return ""
+        try:
+            return " ".join(buf.value.decode(errors="replace").split()) if cf.CFGetTypeID(v) == STR and cf.CFStringGetCString(v, buf, len(buf), 0x08000100) else ""
+        finally:
+            cf.CFRelease(v)
+
+    end, left = time.time() + deadline, [budget]
+
+    def walk(el, depth, nodes):
+        if left[0] <= 0 or time.time() > end:
+            return
+        left[0] -= 1
+        nodes.append((depth, text(el, "AXRole"), text(el, "AXTitle"), text(el, "AXValue"), text(el, "AXDescription")))
+        kids = copy(el, "AXChildren")
+        if kids is None:
+            return
+        try:
+            if cf.CFGetTypeID(kids) == ARR:
+                for i in range(cf.CFArrayGetCount(kids)):
+                    walk(cf.CFArrayGetValueAtIndex(kids, i), depth + 1, nodes)
+        finally:
+            cf.CFRelease(kids)
+
+    app = ax.AXUIElementCreateApplication(pid)
+    ax.AXUIElementSetMessagingTimeout(app, 1.0)
+    out, wins = [], copy(app, "AXWindows")
+    if wins is None:
+        return out
+    try:
+        for i in range(cf.CFArrayGetCount(wins)):
+            w, nodes = cf.CFArrayGetValueAtIndex(wins, i), []
+            walk(w, 0, nodes)
+            out.append((text(w, "AXTitle"), nodes))
+    finally:
+        cf.CFRelease(wins)
+        cf.CFRelease(app)
+    return out
+
+
+def _join(parts):
+    """A row's parts in order, leaving out a part its label already says (a row labelled "From Pat: B" over the text "B")."""
+    out = ""
+    for p in parts:
+        out += "" if p in out else (" " if out else "") + p
+    return out
+
+
+def chat_lines(windows):
+    """(window title, lines) of the meeting chat among Zoom's windows, or (None, []) when no chat panel is open. A window
+    titled like a chat is the chat (and is read first); in another window the chat is the biggest container labelled
+    chat (the panel docked in the meeting window). The main Zoom Workplace window is never read: its Chat tab is the account's team chat.
+    A row (one message, in a list or table) becomes one line; outside rows, each text is a line. Buttons, images and the
+    message box being typed in are left out. Which lines are messages and who sent them is the model's call."""
+    def size(i):  # nodes under node i
+        return next((j for j in range(i + 1, len(nodes)) if nodes[j][0] <= nodes[i][0]), len(nodes)) - i - 1
+
+    for title, nodes in sorted(windows, key=lambda w: not CHAT_WINDOW.search(w[0] or "")):
+        if title == "Zoom Workplace":
+            continue
+        boxes = [i for i, (_, role, t, _, d) in enumerate(nodes) if role not in (
+            "AXButton", "AXStaticText", "AXMenuItem", "AXMenuButton", "AXRadioButton", "AXCheckBox", "AXImage",
+            "AXTextArea", "AXTextField", "AXPopUpButton") and re.search(r"\bchat\b", f"{t} {d}", re.I)]
+        start = 0 if CHAT_WINDOW.search(title or "") else max(boxes, key=size) + 1 if boxes else None  # the biggest
+        if start is None:
+            continue
+        base = nodes[start - 1][0] if start else -1
+        lines, row = [], None  # row: (depth, its texts) while inside a message row
+        for depth, role, t, v, d in nodes[start:]:
+            if depth <= base:
+                break
+            if row and depth <= row[0]:
+                lines.append(_join(row[1]))
+                row = None
+            if role == "AXRow" or (role == "AXCell" and not row):
+                row = (depth, [x for x in (t, d) if x])
+            elif row:
+                part = (v or t or d) if role in ("AXStaticText", "AXLink") else d if role in _ROW_TEXT else ""
+                row[1].extend([part] if part else [])
+            elif role == "AXStaticText" and (v or t or d):
+                lines.append(v or t or d)
+            elif role in ("AXGroup", "AXCell") and len(d.split()) > 2:  # a message drawn as one labelled group
+                lines.append(d)
+        if row and row[1]:
+            lines.append(_join(row[1]))
+        return title or "Zoom", [l for l in lines if l]
+    return None, []
+
+
+def read_zoom_chat():
+    """(window title, lines, problem): the chat as Zoom shows it now; problem says why there is nothing to read."""
+    if not ax_trusted():
+        return None, [], "no Accessibility permission"
+    pids = zoom_pids()
+    if not pids:
+        return None, [], "Zoom is not running"
+    title, lines = chat_lines([w for p in pids for w in ax_windows(p)])
+    return title, lines, "" if title else "no chat panel open in Zoom"
+
+
+class ChatFeed:
+    """New messages of the Zoom chat since the last read. The panel shows a window onto the chat (old rows scroll out
+    and back, a slow read can come back short), so a line is new only when it appears more times than it ever did in
+    one read before. ponytail: an identical line (sender, time and text) that scrolled out and is written again is
+    missed; rows carry the sender and the time, so that is a repeated one-word answer at most."""
+
+    def __init__(self):
+        self.peak, self.first = {}, True
+        self.at, self.problem, self.note, self.seen = 0.0, None, None, None  # last read, why not, its board note, image fingerprint
+
+    def news(self, lines):
+        """The new lines, each run of them after the line before it in brackets (often the sender's name)."""
+        now_n, fresh = {}, []
+        for i, l in enumerate(lines):
+            now_n[l] = now_n.get(l, 0) + 1
+            if now_n[l] > self.peak.get(l, 0):
+                fresh.append(i)
+        for l, n in now_n.items():
+            self.peak[l] = max(self.peak.get(l, 0), n)
+        out, new = [], set(fresh)
+        for i in fresh:
+            if i and i - 1 not in new:
+                out.append(f"({lines[i - 1]})")
+            out.append(lines[i])
+        return out
+
+    def poll(self, session, shots, read=read_zoom_chat):
+        """Read the chat and queue what is new for the next slice: [CHAT] lines, or the chat window's picture when it shows
+        no text to Accessibility. A problem shows once on the board (and goes when it is solved). True when news is queued."""
+        self.at = time.time()
+        title, lines, problem = read()
+        wid = None
+        if title and not lines:  # a chat panel Accessibility shows no text of: its picture instead, when it changed
+            wid, _ = call_window(CHAT_WINDOW)
+            problem = "" if wid else "the chat panel shows no text (pop it out: Open in new window)"
+        if problem != self.problem:
+            self.problem = problem
+            session.out(c("33" if problem else "2", f"{now()} chat: " + (problem or f"reading '{title}'")))
+            with session.cond:
+                if self.note:
+                    session.retire(self.note, "done")
+                    self.note = None
+                if problem and problem != "Zoom is not running":
+                    ans = getattr(session, "answering", False)  # a status note must not take the place of an answer
+                    session._apply({"note": [{"lines": [f"Chat not read: {problem}", "Fix it, or keep an eye on the chat"],
+                                              "importance": 2, "source": "chat reader", "chat": True}]})
+                    session.answering, self.note = ans, f"s{session.n_say}"
+        if problem:
+            return False
+        if wid:
+            shots.mkdir(exist_ok=True)
+            f = shots / f"chat-{datetime.now():%H%M%S}.jpg"
+            fp = capture_window(wid, f)
+            with session.cond:
+                if not (fp and changed(fp, self.seen, threshold=1)) or session.screen:  # unchanged, or the slot is taken
+                    f.unlink(missing_ok=True)
+                    return False
+                self.seen, session.screen = fp, (title, f.read_bytes())
+            return True
+        new, first, self.first = self.news(lines), self.first, False
+        if not new:
+            return False
+        with session.cond:
+            session.pending.append(("[CHAT] The chat so far, from before you attached:\n" if first else "[CHAT] New in the meeting chat:\n")
+                                   + "\n".join(new))
+        session.out(c("2", f"{now()} chat: {len(new)} new line(s)"))
+        for l in new:
+            session.out(c("2", f"  chat: {l}"), log_only=True)
+        return True
 
 
 def wait_for_recording(report):
@@ -730,7 +962,7 @@ def serve_board(session, port=8770):
 # ---------------------------------------------------------------- Claude session
 class Session:
     collecting = False  # a Wrap Up during the call: plain-text replies are its wrap-up and packets
-    def __init__(self, project, model, effort, name, log, show_transcript, before=None, pinned=None):
+    def __init__(self, project, model, effort, name, log, show_transcript, before=None, pinned=None, chat=False):
         if not CLAUDE_BIN:
             sys.exit("claude binary not found")
         context, add_dirs, brief = load_context(project)
@@ -751,7 +983,8 @@ class Session:
         self.brief_seen = {}
         brief_news(self.brief_seen, self.brief_files)
         allow, lookup = (None, "") if before else lookup_prompt()  # a replay cannot ask today's truth about a past call
-        prompt = PROMPT.replace("{root}", str(project)).replace("{user}", USER) + ("\n\n" + context if context else "") + (
+        prompt = PROMPT.replace("{root}", str(project)).replace("{user}", USER) + (
+            "\n\n" + CHAT_PROMPT.replace("{user}", USER) if chat else "") + ("\n\n" + context if context else "") + (
             "\n\n" + lookup if lookup else "") + (
             "\n\n[PROJECT DIGEST] The CLAUDE.md of the folders you can read, as of this call.\n" + digest if digest else "") + (
             "\n\n[PRE-MEETING BRIEF] Gathered before the call: the last call's wrap-up and recent work. Use it when it answers something; never restate it.\n" + brief if brief else "")
@@ -863,7 +1096,8 @@ class Session:
             self.n_say += 1
             item = {"id": f"s{self.n_say}", "pane": "say", "lines": lines, "source": str(it.get("source") or ""),
                     "importance": max(1, min(3, int(it.get("importance") or 1))), "born": time.time(),
-                    **({"note": True} if it.get("note") else {"answer": True} if answer else {})}
+                    **({"note": True} if it.get("note") else {"answer": True} if answer else {}),
+                    **({"chat": True} if it.get("chat") else {})}  # a chat question waits for its moment: CHAT_AGE
             self.items[item["id"]] = item
             self.event("add", item)
             self.out("")  # logged as a NOTE block so the scorer and the judge read it like any other run
@@ -1031,14 +1265,14 @@ class Session:
         # fifteen (they asked for it, and may read it later); the model or the user retires either sooner
         with self.cond:
             for i in [i for i in self.items.values() if i["pane"] == "say"
-                      and time.time() - i["born"] > (answer_age if i.get("answer") else max_age)]:
+                      and time.time() - i["born"] > (CHAT_AGE if i.get("chat") else answer_age if i.get("answer") else max_age)]:
                 self.retire(i["id"], "expire")
 
     def board_line(self):
         """What the model is told is on the board, with ids, so it retires instead of re-posting."""
         with self.cond:
             items = list(self.items.values())
-        say = [f'{i["id"]}{" (note)" if i.get("note") else ""} "{" ".join(" ".join(i["lines"]).split()[:6])}"' for i in items if i["pane"] == "say"]
+        say = [f'{i["id"]}{" (note)" if i.get("note") else ""}{" (chat)" if i.get("chat") else ""} "{" ".join(" ".join(i["lines"]).split()[:6])}"' for i in items if i["pane"] == "say"]
         ag = sorted((i for i in items if i["pane"] == "agenda"), key=lambda i: i["rank"])
         agenda = [f'{i["id"]} "{i["text"]}"' for i in ag if "done" not in i]
         raised = [f'{i["id"]} "{" ".join(i["text"].split()[:6])}"' for i in ag if "done" in i]
@@ -1075,8 +1309,10 @@ class Session:
         return self.send(f"[USER] {line}", label=f"you asked: {line}")
 
     def send_transcript(self, rows):
-        self.heard = True
-        text = format_batch(rows)
+        """A slice: the new transcript rows (none when only the chat has news) and whatever is pending."""
+        if rows:
+            self.heard = True
+        text = format_batch(rows) if rows else ""
         for r in rows:
             self.out(c("2", f"  [{r['timestamp_label']}] {r['speaker']}: {r['text']}"), log_only=not self.show_transcript)
             self.event("transcript", {"t": r["timestamp_label"], "who": r["speaker"], "text": r["text"]}, log=False)
@@ -1086,7 +1322,7 @@ class Session:
             screen, self.screen = self.screen, None
         if screen:
             tail.append(f"[SCREEN] The meeting window ({screen[0]}) at {now()}, attached.")
-        return self.send(text + "".join("\n" + t for t in tail if t), image=screen and screen[1])
+        return self.send((text + "".join("\n" + t for t in tail if t)).strip(), image=screen and screen[1])
 
     def _ask_after(self, msg, label, n, timeout):
         """Send a post-meeting request (held until the current turn ends) and wait for its plain-text reply, the n-th."""
@@ -1196,14 +1432,37 @@ def main():
     ap.add_argument("--port", type=int, default=8770, help="board page port (the first free of ten from here)")
     ap.add_argument("--shell-config", action="store_true", help="print the tenant settings as shell variables (the menu bar)")
     ap.add_argument("--make-shortcut", action="store_true", help="create the shortcut Tactician uses to start Muesli recordings")
+    ap.add_argument("--zoom-chat", action="store_true", help="watch the Zoom desktop app's meeting chat (needs Accessibility)")
+    ap.add_argument("--chat-replay", metavar="FILE", help='replay: chat lines "[HH:MM:SS] Name: text", fed as the transcript reaches them')
+    ap.add_argument("--chat-probe", action="store_true", help="print what the Zoom chat reader sees now, no Claude")
+    ap.add_argument("--context", help="use contexts/<NAME>.md alone instead of the project folder's context maps")
+    ap.add_argument("--preset", metavar="NAME", help="a start from the config's [presets.NAME]: project, context, participants, zoom_chat")
     a = ap.parse_args()
+    if a.chat_probe:
+        title, lines, problem = read_zoom_chat()
+        for p in zoom_pids():
+            for t, nodes in ax_windows(p):
+                print(f"window '{t}' (pid {p}): {len(nodes)} accessibility nodes")
+        print(f"chat: {problem or title!r}, {len(lines)} lines" + "".join(f"\n  {l}" for l in lines))
+        return 0 if lines else 1
+    preset = CONFIG.get("presets", {}).get(a.preset or "", {})
+    if a.preset and not preset:
+        sys.exit(f"no [presets.{a.preset}] in {HOME / 'config.toml'}")
+    if preset:  # the preset fills what the command line left unsaid
+        a.project = preset.get("project", a.project)
+        a.context = a.context or preset.get("context")
+        a.participants = a.participants or preset.get("participants")
+        a.zoom_chat = a.zoom_chat or bool(preset.get("zoom_chat"))
+    global CONTEXT_NAME
+    CONTEXT_NAME = a.context
     if a.make_shortcut:
         return make_shortcut()
     if a.shell_config:
         q = shlex.quote
         print(f"TACTICIAN_HOME={q(str(HOME))}; DEFAULT_PROJECT={q(CONFIG.get('default_project', ''))}; "
               f"PARTICIPANTS={q(CONFIG.get('participants', ''))}; PROFILE={q(CONFIG.get('browser_profile', 'Default'))}; "
-              f"ROOTS=({' '.join(q(str(r)) for r in ROOTS)})")
+              f"ROOTS=({' '.join(q(str(r)) for r in ROOTS)}); "
+              f"PRESETS=({' '.join(q(k) + ' ' + q(v.get('label', k)) for k, v in CONFIG.get('presets', {}).items())})")
         return 0
     POLL_S = a.poll
 
@@ -1236,9 +1495,11 @@ def main():
     opts = {k: v for k, v in vars(a).items() if k != "project" and v not in (None, False)}
     log.write(f"# {name}\nproject: {project}\nstarted: {datetime.now().isoformat(timespec='seconds')}\n"
               + (f"meeting: {m['id']} at {start}\n" if m else "") + f"args: {json.dumps(opts)}\n\n")
-    session = Session(project, a.model, a.effort, name, log, a.show_transcript,
-                      before=start[:10] if a.replay else None, pinned=pinned)  # a replay's brief stops before the call it replays
-    session.title = f"{project.name} call"  # the Muesli recording's title when Tactician starts it
+    session = Session(project, a.model, a.effort, name, log, a.show_transcript, before=start[:10] if a.replay else None,
+                      pinned=pinned, chat=a.zoom_chat or bool(a.chat_replay))  # a replay's brief stops before the call it replays
+    session.title = preset.get("label") or f"{project.name} call"  # the Muesli recording's title when Tactician starts it
+    chat = ChatFeed() if a.zoom_chat and not a.replay else None
+    chat_rows = parse_transcript(Path(a.chat_replay).read_text()) if a.chat_replay else []
     signal.signal(signal.SIGTERM, lambda *_: session.stop())  # Stop in the menu: as End on the board, with the wrap-up
     url = serve_board(session, a.port)
     session.out(c("2", f"{now()} board: {url or 'no free port'}"))
@@ -1299,6 +1560,13 @@ def main():
         looked, seen, why_not = 0, None, ""  # the meeting window: last look, fingerprint of the last image sent, why none
         shots = LOG_DIR / f"{name}.screens"  # every image the session saw, kept with the run's log
         for rows in feed:
+            chatty = bool(chat and time.time() - chat.at > CHAT_S and chat.poll(session, shots))
+            if chat_rows and rows:  # a replay's chat arrives on the transcript's clock
+                due = [r for r in chat_rows if r["timestamp_label"] <= rows[-1]["timestamp_label"]]
+                chat_rows = chat_rows[len(due):]
+                if due:
+                    with session.cond:
+                        session.pending.append("[CHAT] New in the meeting chat:\n" + format_batch(due))
             if not a.replay and (session.look or time.time() - looked > SCREEN_S):
                 looked, session.look = time.time(), False
                 wid, title = call_window()
@@ -1337,6 +1605,9 @@ def main():
                         session.pending.append(f"[UPDATE] What {USER} and their agent sessions said since your last look, newest last:\n" + upd)
                     session.out(c("2", f"{now()} update from the agent sessions: {upd.count(chr(10)) + 1} lines"))
             if not rows:  # a quiet poll: after STALL_S the board says the transcript has stopped
+                if chatty and not session.send_transcript([]):  # chat news goes out without waiting for speech
+                    print(c("31", f"{now()} claude exited (code {session.p.returncode}); see logs/{name}.stderr.log"))
+                    return 1
                 if time.time() - last_row > STALL_S:
                     session.set_rec("stalled")
                 continue

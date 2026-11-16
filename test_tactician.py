@@ -324,3 +324,51 @@ assert s.send_items("lane-a", "1. x") == "" and "send --workspace workspace:2 Ac
 assert "sent to A (workspace:2)" in (call.parent / "2026-10-19-0900-sent-lane-a.md").read_text()
 la.CMUX = str(tmp / "no-such-cmux"); assert s.send_items("lane-a", "1. x").startswith("cmux not found")
 print("send and copy ok")
+
+# Zoom chat: Accessibility nodes (depth, role, title, value, description) -> chat lines; the main window is never read
+N = lambda d, role, t="", v="", desc="": (d, role, t, v, desc)
+docked = ("Zoom Meeting", [N(0, "AXWindow", "Zoom Meeting"), N(1, "AXGroup", desc="Toolbar"), N(2, "AXButton", desc="Chat"),
+                           N(1, "AXGroup", desc="Meeting chat"), N(2, "AXStaticText", v="Who can see your messages?"),
+                           N(2, "AXTable", desc="chat list"),
+                           N(3, "AXRow"), N(4, "AXStaticText", v="Sam Lee"), N(4, "AXStaticText", v="10:05 AM"),
+                           N(4, "AXStaticText", v="Does it post to the ledger?"), N(4, "AXButton", desc="More"),
+                           N(3, "AXRow", desc="From Pat to everyone: B"), N(4, "AXStaticText", v="B"),
+                           N(2, "AXTextArea", v="my unsent draft"), N(1, "AXGroup", desc="Video"),
+                           N(2, "AXStaticText", v="Pat's video")])
+home = ("Zoom Workplace", [N(0, "AXWindow"), N(1, "AXGroup", desc="Team chat"), N(2, "AXStaticText", v="private team chat")])
+assert la.chat_lines([home, docked]) == ("Zoom Meeting", ["Who can see your messages?", "Sam Lee 10:05 AM Does it post to the ledger?",
+                                                          "From Pat to everyone: B"]), la.chat_lines([home, docked])
+pop = ("Meeting chat", [N(0, "AXWindow", "Meeting chat"), N(1, "AXStaticText", v="Sam Lee"), N(1, "AXStaticText", v="Hi all"),
+                        N(1, "AXGroup", desc="From Sam Lee to everyone: is HST covered?"), N(1, "AXTextField", v="draft")])
+assert la.chat_lines([pop]) == ("Meeting chat", ["Sam Lee", "Hi all", "From Sam Lee to everyone: is HST covered?"])
+assert la.chat_lines([docked, pop])[0] == "Meeting chat"  # while sharing: the floating chat window, not a stale docked panel
+assert la.chat_lines([home]) == (None, []) and la.chat_lines([("Zoom Meeting", [N(0, "AXWindow"), N(1, "AXButton", desc="Chat")])]) == (None, [])
+# new lines only: a read that comes back short or scrolled adds nothing; a repeated line is new only past its peak count
+f = la.ChatFeed()
+assert f.news(["Sam", "Hi all", "Pat", "Y"]) == ["Sam", "Hi all", "Pat", "Y"]
+assert f.news(["Hi all", "Pat", "Y"]) == [] and f.news(["Sam", "Hi all"]) == []
+assert f.news(["Pat", "Y", "Dee", "Y", "Dee", "how do I install it?"]) == ["(Y)", "Dee", "Y", "Dee", "how do I install it?"], f.peak
+assert f.news(["Pat", "Y", "Dee", "Y", "Dee", "how do I install it?"]) == []
+# poll: news goes to the next slice as [CHAT]; a problem shows once on the board as a held chat note and goes when solved
+s = la.Session.__new__(la.Session); s.log, s.ended, s.out = FakeOut(), False, lambda *a, **k: None  # `fake` is a path by now
+s.items, s.n_say, s.events, s.items_log, s.cond, s.pending, s.screen = {}, 0, [], FakeOut(), threading.Condition(), [], None
+s.rec = {"state": "recording"}
+reads = iter([(None, [], "no Accessibility permission"), (None, [], "no Accessibility permission"),
+              ("Meeting chat", ["Sam", "Hi"], ""), ("Meeting chat", ["Sam", "Hi", "Sam", "does it post?"], ""),
+              ("Meeting chat", ["Sam", "Hi", "Sam", "does it post?"], "")])
+f = la.ChatFeed(); poll = lambda: f.poll(s, tmp / "shots", read=lambda: next(reads))
+assert not poll() and s.items["s1"]["note"] and s.items["s1"]["chat"] and "Accessibility" in s.items["s1"]["lines"][0]
+assert not poll() and s.n_say == 1  # once
+assert poll() and "s1" not in s.items and s.pending == ["[CHAT] The chat so far, from before you attached:\nSam\nHi"], s.pending
+s.pending = []
+assert poll() and s.pending == ["[CHAT] New in the meeting chat:\n(Hi)\nSam\ndoes it post?"], s.pending
+assert not poll()
+# a chat-only slice goes out with no transcript; chat items wait CHAT_AGE, are marked (chat) for the model, never answers
+sent = []; s.send = lambda text, label=None, priority=None, image=None: sent.append(text) or True
+assert s.send_transcript([]) and sent[-1].startswith("[CHAT] New in the meeting chat:\n(Hi)") and not getattr(s, "heard", False), sent
+s._note('{"note": [{"lines": ["Sam asked: does it post?", "No: it drafts, you post"], "chat": true, "source": "chat 10:05"}]}')
+q = f"s{s.n_say}"; s.items[q]["born"] -= 1800; s.expire()
+assert q in s.items and f'{q} (note) (chat) "Sam asked: does it post?' in s.board_line(), s.board_line()
+s.items[q]["born"] -= 1801; s.expire(); assert q not in s.items
+assert "{user}" not in la.CHAT_PROMPT.replace("{user}", "Alex") and "—" not in la.CHAT_PROMPT
+print("zoom chat ok")
