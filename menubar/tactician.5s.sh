@@ -34,6 +34,9 @@ else
   echo " | templateImage=$(logo '#000')"
   echo "---"
   [ -n "$DEFAULT_PROJECT" ] && echo "Start $DEFAULT_PROJECT Call | $RUN param1=start sfimage=play.circle"
+  for ((i = 0; i < ${#PRESETS[@]}; i += 2)); do  # the config's [presets.*]: a start with its own project, context and names
+    echo "Start ${PRESETS[i + 1]} | $RUN param1=start param2=--preset=${PRESETS[i]} sfimage=play.circle.fill"
+  done
   echo "Start Call In | sfimage=folder"
   for r in "${ROOTS[@]}"; do  # each project root, then its folders, listed live so a new repo shows up by itself
     echo "--$(basename "$r"), general (any project) | $RUN param1=start param2=$r"

@@ -17,11 +17,12 @@ case "$1" in
     names=$(osascript -e "text returned of (display dialog \"Who is on the call?\" default answer \"$last\" with title \"Tactician\")") || exit 0
     printf '%s' "$names" > "$NAMES"
     exec "$0" start ;;
-  start)  # $2: the project folder; none = tactician.py's default
+  start)  # $2: the project folder, or --preset=NAME; none = tactician.py's default
     if running && ! grep -q "[0-9] done: " "$OUT"; then open_board; exit 0; fi
     running && kill -TERM "$(cat "$PID")" && sleep 0.5  # the last call's board, still open for its wrap-up
     mkdir -p "$TACTICIAN_HOME/logs"
-    args=(); [ -n "$2" ] && args+=("$2"); n=$(names); [ -n "$n" ] && args+=(--with "$n")
+    args=(); [ -n "$2" ] && args+=("$2"); n=$(names)
+    [ -n "$n" ] && [[ $2 != --preset=* ]] && args+=(--with "$n")  # a preset brings its own names
     set -m  # own process group, so the job outlives this script and Stop's SIGINT reaches it
     nohup "$C/tactician.py" "${args[@]}" < /dev/null > "$OUT" 2>&1 &
     echo $! > "$PID"

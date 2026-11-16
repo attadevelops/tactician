@@ -96,6 +96,29 @@ the next transcript slice carries the image, so shared slides and documents reac
 never the rest of the screen; the images are kept in `logs/<run>.screens/`. It needs Screen Recording permission for the
 app that starts Tactician (SwiftBar from the menu bar): without it the log says so once and the call runs on audio alone.
 
+## Zoom chat (--zoom-chat)
+
+For a talk or a workshop you present on Zoom, Tactician can watch the meeting chat for you: `--zoom-chat`, or
+`zoom_chat = true` in a preset. Every 10 seconds it reads the chat as text through macOS Accessibility (read-only:
+attributes are copied, never set; each call gives up after a second, so a busy Zoom is never held up) and sends what is
+new to the session as `[CHAT]`. The model, not a script, decides what is a question:
+- a question is held: a quiet chat note in the Notes pane, "<name> asked: ..." with a one or two line answer;
+- it becomes an amber Say item, "Good moment: <name> asked ...", only when the talk reaches its topic or at a natural
+  pause (you ask for questions, a break, a question stop in the plan); one nudge at a time, never red;
+- once you have answered it aloud: "Check with <name>: did that answer your question?";
+- poll letters, Y/N, thanks and one-word answers to your own questions are never posted.
+
+Held chat items stay up to an hour (Done on the board retires one). Where the chat must be: the Zoom desktop app,
+its chat open. Docked in the meeting window works when you are not sharing; while you share your screen, open Chat
+from the share toolbar (or pop it out first, "Open in new window") so it is a window of its own, and keep it open on
+the display you do not share, next to the board. The main Zoom Workplace window is never read (its Chat tab
+is your team chat). Accessibility must be allowed for the app that starts Tactician (SwiftBar from the menu bar;
+System Settings, Privacy & Security, Accessibility); without it, or with no chat open, the board says so in a note.
+When the chat shows no text to Accessibility, the chat window's picture goes to the model instead (Screen Recording).
+`tactician --chat-probe` prints what the reader sees right now: run it with the chat open before a session.
+`python3 evals/chat/chat_check.py` replays an invented workshop with its chat through the real model and checks the
+held, nudge and check-with behaviour.
+
 ## What Tactician knows
 
 - The project folder you name, plus the context map's `add-dir:` folders, read-only (Read, Grep, Glob, a graphify
@@ -146,7 +169,9 @@ tenant's post-call steps.
 the Tactician logo (`logo.svg`): the menu bar's own colour when off, orange while waiting for Muesli, red during the call,
 a yellow triangle on a problem. Start <default> Call, Start Call In (each project root, general or one of its folders,
 listed live) and Start With Names... run Tactician in the background (console: `~/.tactician/logs/menubar.out`) and open the
-board; every start passes the last names given (the config's `participants` at first). While it runs the menu shows the
+board; every start passes the last names given (the config's `participants` at first). Each `[presets.<name>]` in the
+config adds a Start <label> entry with its own project, context map (`context`: `contexts/<context>.md` alone),
+participants and `zoom_chat` (`tactician --preset <name>` from a terminal). While it runs the menu shows the
 project; Stop and Wrap Up is End on the board: it writes the wrap-up and ends the Muesli recording if Tactician
 started it, so the next call gets a recording of its own. A Start that joins a recording already running skips its
 transcript older than two minutes (an earlier call). Last Wrap-up and Review Last Call (a cmux workspace running

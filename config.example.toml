@@ -31,6 +31,15 @@ stop_shortcut = "Tactician Stop Meeting"
 # argument (e.g. a second brain's ingest). It runs detached; its output goes to logs/after-call-*.log.
 # after_call = "~/notes/brain/ingest-call"
 
+# A menu bar entry "Start <label>" for a recurring kind of call: its project, a context map used alone
+# (contexts/<context>.md), who is on it, and zoom_chat to watch the Zoom meeting chat (README, "Zoom chat").
+# [presets.workshop]
+# label = "Acme Workshop"
+# project = "~/work/acme/workshop"
+# context = "acme-workshop"
+# participants = "Alex presents; about 20 attendees"
+# zoom_chat = true
+
 # Send on the board after a call goes to the cmux session whose folder is the lane's (general: the project root). Only a
 # folder with several sessions needs an entry: lane = the workspace title to use.
 # [sessions]
