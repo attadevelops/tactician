@@ -438,7 +438,7 @@ def changed(a, b, threshold=8):
 CHAT_S = 10  # how often the Zoom chat is read (--zoom-chat)
 CHAT_AGE = 3600  # a chat question on the board waits this long for its moment before it expires
 CHAT_WINDOW = re.compile(r"chat", re.I)  # a Zoom window of its own for the chat: popped out, or floating while sharing
-_ROW_TEXT = ("AXStaticText", "AXLink", "AXGroup", "AXCell", "AXHeading")  # text that belongs to one chat message row
+_ROW_TEXT = ("AXStaticText", "AXLink", "AXGroup", "AXCell", "AXHeading", "AXUnknown")  # text that belongs to one chat message row
 
 
 def ax_trusted():
