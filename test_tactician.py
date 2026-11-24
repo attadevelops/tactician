@@ -384,3 +384,20 @@ held, nudge = s.items[f"s{s.n_say}"], s.items[f"s{s.n_say - 1}"]  # a held quest
 assert held["note"] and held["lines"][0].startswith("Kim") and "note" not in nudge and nudge["importance"] == 2, (held, nudge)
 assert "{user}" not in la.CHAT_PROMPT.replace("{user}", "Alex") and "—" not in la.CHAT_PROMPT
 print("zoom chat ok")
+
+# the prompter shows the loudest say item, the newest among equals, never a note; a new text replaces the one showing,
+# the same text is not sent twice, and nothing to say closes Textream
+s.ended = False
+s.items = {"s1": {"pane": "say", "lines": ["old"], "importance": 2, "born": 1},
+           "s2": {"pane": "say", "lines": ["new", "one"], "importance": 2, "born": 2},
+           "s3": {"pane": "say", "lines": ["Kim asked"], "importance": 2, "born": 3, "note": True},
+           "a1": {"pane": "agenda", "text": "scope", "rank": 1, "born": 4}}
+assert la.prompter_text(s) == "new one"
+s.items["s4"] = {"pane": "say", "lines": ["CAREFUL: March, not April"], "importance": 3, "born": 0}
+assert la.prompter_text(s) == "CAREFUL: March, not April"
+ran = []; p = la.Prompter.__new__(la.Prompter); p.shown, p.run = "", lambda cmd, **k: ran.append(cmd)
+p.show("a b"); p.show("a b"); p.show("")
+assert ran == [["open", "-g", "textream://read?text=a%20b"], ["pkill", "-x", "Textream"]], ran
+s.ended = True; assert la.prompter_text(s) == ""
+assert isinstance(la.builtin_display(), (int, type(None)))
+print("prompter ok")

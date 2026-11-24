@@ -74,6 +74,18 @@ Wording: lines are written for whoever they answer: plain words by default (a te
 brackets), technical only when a developer asked. Give participants with roles (`--with`, or `participants` in the
 config) so Tactician can tell.
 
+## Prompter (--prompter)
+
+On a video call, reading the board on a side monitor shows: your eyes leave the camera. `tactician <project> --prompter`
+(or `prompter = true` in the config or in a preset) also shows the one line to say in Textream
+(<https://github.com/f/textream>, installed separately), in its overlay under the notch of the built-in screen, beside
+the camera. It is always the loudest say item, the newest among equals; notes, the agenda and commitments stay on the
+board, which opens as usual. Textream only displays: nothing listens for the words, so a line stays until the board
+retires it (you said it, the question was answered, the topic moved on, or you marked it), and skipping one costs
+nothing. With nothing to say there is no overlay. Tactician sets Textream's mode, screen and size for the call (fixed
+speed, no microphone) and puts your own Textream settings back when it ends. With the lid closed the overlay goes to
+the main screen.
+
 ## Recording
 
 When Tactician starts and Muesli is not recording, Tactician starts the recording, titled "<project> call", through Muesli's
@@ -176,7 +188,7 @@ a yellow triangle on a problem. Start <default> Call, Start Call In (each projec
 listed live) and Start With Names... run Tactician in the background (console: `~/.tactician/logs/menubar.out`) and open the
 board; every start passes the last names given (the config's `participants` at first). Each `[presets.<name>]` in the
 config adds a Start <label> entry with its own project, context map (`context`: `contexts/<context>.md` alone),
-participants and `zoom_chat` (`tactician --preset <name>` from a terminal). While it runs the menu shows the
+participants, `zoom_chat` and `prompter` (`tactician --preset <name>` from a terminal). While it runs the menu shows the
 project; Stop and Wrap Up is End on the board: it writes the wrap-up and ends the Muesli recording if Tactician
 started it, so the next call gets a recording of its own. A Start that joins a recording already running skips its
 transcript older than two minutes (an earlier call). Last Wrap-up and Review Last Call (a cmux workspace running

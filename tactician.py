@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import tomllib
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -972,6 +973,69 @@ def serve_board(session, port=8770):
     return ""
 
 
+# ---------------------------------------------------------------- prompter
+TEXTREAM = "dev.fka.textream"  # https://github.com/f/textream, behaviour measured on 1.7.1
+# Textream reads its settings at launch. Fixed-speed mode: no microphone, and nothing waits on what is said. The overlay
+# sits under the notch of one screen, wide and tall enough that a whole say item (three lines of twelve words) fits:
+# a text that fits glides up to the top within seconds and stays, a longer one scrolls its first lines out of sight.
+TEXTREAM_SETTINGS = {"listeningMode": "classic", "overlayMode": "pinned", "notchDisplayMode": "fixedDisplay",
+                     "scrollSpeed": 4.0, "notchWidth": 600, "textAreaHeight": 240}
+
+
+def builtin_display():
+    """The laptop's own screen, the one with the camera, as a CoreGraphics display id; None with the lid closed."""
+    import ctypes, ctypes.util
+    cg = ctypes.CDLL(ctypes.util.find_library("CoreGraphics"))
+    ids, n = (ctypes.c_uint32 * 16)(), ctypes.c_uint32()
+    cg.CGGetActiveDisplayList(16, ids, ctypes.byref(n))
+    return next((i for i in ids[:n.value] if cg.CGDisplayIsBuiltin(i)), None)
+
+
+def prompter_text(session):
+    """The one thing to say now: the loudest say item, the newest among equals. Notes are never read aloud, and after the
+    call there is nothing left to say."""
+    with session.cond:
+        says = [i for i in session.items.values() if i["pane"] == "say" and not i.get("note")]
+    top = max(says, key=lambda i: (i["importance"], i["born"]), default=None)
+    return " ".join(top["lines"]) if top and not session.ended else ""
+
+
+class Prompter:
+    """--prompter: the line to say, in Textream's overlay under the notch of the built-in screen, beside the camera, so
+    reading it looks like looking at the room. Textream only displays: a line stays until the board retires it (said,
+    answered, or the topic moved on), so skipping one costs nothing. The board keeps everything else."""
+    def __init__(self, session, run=subprocess.run):
+        self.shown, self.run, self.closed = "", run, False
+        self.saved = run(["defaults", "export", TEXTREAM, "-"], capture_output=True).stdout  # the user's own settings, put back by close()
+        screen = builtin_display()
+        self.settings = TEXTREAM_SETTINGS | ({"pinnedScreenID": screen} if screen else {})
+        run(["pkill", "-x", "Textream"])  # a running Textream keeps the settings it started with
+        for k, v in self.settings.items():
+            run(["defaults", "write", TEXTREAM, k, {str: "-string", int: "-int", float: "-float"}[type(v)], str(v)])
+        threading.Thread(target=self.watch, args=(session,), daemon=True).start()
+
+    def watch(self, session):  # once a second, so a reply that adds and retires items is one change on screen
+        while not self.closed:
+            self.show(prompter_text(session))
+            time.sleep(1)
+
+    def show(self, text):
+        if text == self.shown:
+            return
+        self.shown = text
+        if text:  # starts Textream when it is not running; a new text replaces the one showing
+            self.run(["open", "-g", "textream://read?text=" + urllib.parse.quote(text)])
+        else:  # ponytail: Textream has no "clear" (an empty text is ignored, quit is refused while it reads), so nothing
+            self.run(["pkill", "-x", "Textream"])  # to say means no overlay; its Director socket could, but forces word tracking
+
+    def close(self):
+        self.closed = True
+        self.show("")
+        for k in self.settings:  # import merges, so our keys go first and the saved ones come back as they were
+            self.run(["defaults", "delete", TEXTREAM, k], capture_output=True)
+        self.run(["defaults", "import", TEXTREAM, "-"], input=self.saved)
+
+
 # ---------------------------------------------------------------- Claude session
 class Session:
     collecting = False  # a Wrap Up during the call: plain-text replies are its wrap-up and packets
@@ -1456,7 +1520,8 @@ def main():
     ap.add_argument("--chat-probe", action="store_true", help="print what the Zoom chat reader sees now, no Claude")
     ap.add_argument("--context", help="use contexts/<NAME>.md alone instead of the project folder's context maps")
     ap.add_argument("--show-brief", action="store_true", help="print what a call in this project would know (digest, status, brief files), no Claude")
-    ap.add_argument("--preset", metavar="NAME", help="a start from the config's [presets.NAME]: project, context, participants, zoom_chat")
+    ap.add_argument("--prompter", action="store_true", help="also show the line to say in Textream, under the notch of the built-in screen")
+    ap.add_argument("--preset", metavar="NAME", help="a start from the config's [presets.NAME]: project, context, participants, zoom_chat, prompter")
     a = ap.parse_args()
     if a.chat_probe:
         title, lines, problem = read_zoom_chat()
@@ -1473,6 +1538,7 @@ def main():
         a.context = a.context or preset.get("context")
         a.participants = a.participants or preset.get("participants")
         a.zoom_chat = a.zoom_chat or bool(preset.get("zoom_chat"))
+    a.prompter = a.prompter or bool(preset.get("prompter", CONFIG.get("prompter")))
     global CONTEXT_NAME
     CONTEXT_NAME = a.context
     if a.make_shortcut:
@@ -1534,6 +1600,12 @@ def main():
     session.out(c("2", f"{now()} board: {url or 'no free port'}"))
     if url and sys.stdin.isatty():  # the configured Chrome profile, as an app window on the side monitor
         subprocess.Popen(["open", "-na", "Google Chrome", "--args", f"--profile-directory={CONFIG.get('browser_profile', 'Default')}", f"--app={url}"])
+    prompter = None
+    if a.prompter and not any((d / "Applications/Textream.app").exists() for d in (Path("/"), Path.home())):
+        session.out(c("33", f"{now()} prompter: Textream is not installed (https://github.com/f/textream); the board has every line"))
+    elif a.prompter:
+        prompter = Prompter(session)
+        session.out(c("2", f"{now()} prompter: the line to say shows in Textream, under the notch"))
     day0 = datetime.strptime(start[:10], "%Y-%m-%d")  # the model gets weekdays from this, never by computing them (it got 10-13 wrong)
     cal = ", ".join(f"{day0 + timedelta(d):%a %m-%d}" for d in range(-7, 15))
     ctx = f"[CONTEXT] Call date {start[:10]}." + (f" Participants: {a.participants}. Use their names instead of speaker labels." if a.participants else "") + (
@@ -1669,6 +1741,8 @@ def main():
             session.out(c("2" if ok else "33", f"{now()} " + ("asked Muesli to stop recording" if ok else "stop the recording in Muesli")))
         session.finish(wrapup=wrap, timeout=180 if wrap else 20)
     finally:
+        if prompter:
+            prompter.close()
         log.close()
     if session.rec.get("saved"):
         session.linger()
