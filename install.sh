@@ -9,14 +9,14 @@ python3 -c 'import sys, tomllib; sys.exit(sys.version_info < (3, 11))' 2>/dev/nu
   || { echo "Tactician needs python3 3.11 or newer on PATH (brew install python)"; exit 1; }
 git -C "$C" config core.hooksPath hooks                      # the pre-push guard against pushing tenant data
 
-mkdir -p "$T"/{contexts,logs,meetings,evals,docs}            # the tenant folder: this company's data, never the repo's
+mkdir -p "$T"/{contexts,logs,meetings,evals,docs,status}            # the tenant folder: this company's data, never the repo's
 [ -f "$T/config.toml" ] || cp "$C/config.example.toml" "$T/config.toml"
 [ -f "$T/NOTES.md" ] || printf '# Tenant notes (read by the tactician-review skill)\n\nPost-call steps:\n\nConstraints:\n' > "$T/NOTES.md"
 touch "$T/denylist" "$T/blocked-roots"                       # terms and private histories the pre-push guard refuses
 
 mkdir -p "$HOME/.local/bin" "$HOME/.claude/skills"
 ln -sfn "$C/tactician.py" "$HOME/.local/bin/tactician"
-for s in tactician-review tactician-setup tactician-read; do ln -sfn "$C/skills/$s" "$HOME/.claude/skills/$s"; done
+for s in "$C"/skills/*/; do ln -sfn "${s%/}" "$HOME/.claude/skills/$(basename "$s")"; done  # every skill, so a release can add one
 P=$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)
 if [ -n "$P" ]; then
   printf '#!/bin/bash\n# <bitbar.title>Tactician</bitbar.title>\n# The plugin lives in the tactician checkout; this file only runs it.\nexec "%s/menubar/tactician.5s.sh"\n' "$C" > "$P/tactician.5s.sh"
@@ -28,5 +28,5 @@ fi
 python3 "$C/tactician.py" --make-shortcut || echo "Could not make the shortcut (needs Muesli installed): run tactician --make-shortcut later"
 
 cat <<MSG
-Installed. Next: run  claude /tactician-setup  (it interviews you into $T: config, context map, access map, denylist).
+Installed. Next: run  claude /tactician-setup  (it interviews you into $T: config, context map, status hub, access map, denylist).
 MSG

@@ -48,7 +48,8 @@ packets are in `~/.tactician/meetings/<project>/<date>-<HHMM>*.md`.
   things the live run could not: compare the verdicts, not only the totals.
 - **The call's outcome reaches the next brief.** Run the post-call steps in `~/.tactician/NOTES.md` (for example:
   fold the wrap-up and the packets into the engagement digest's commitments, delete the call-queue lines the
-  wrap-up shows as raised).
+  wrap-up shows as raised). Then bring the status hub up to date for every project the call touched (the
+  `tactician-status` skill, those projects only): what was decided, promised, unblocked or newly blocked.
 - **Leave a record.** Append the graded run, their verdicts, what changed and the before/after judge numbers
   to a dated `~/.tactician/docs/live-<date>.md`; commit prompt changes in the tactician repo.
 

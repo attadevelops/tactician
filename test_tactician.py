@@ -206,13 +206,22 @@ print("context ok")
 import tempfile
 tmp = la.Path(tempfile.mkdtemp()); (tmp / "proj").mkdir(); (tmp / "p1").mkdir()
 la.CONTEXT_DIR = tmp / "contexts"; la.CONTEXT_DIR.mkdir()
+la.STATUS_DIR = tmp / "status"  # absent at first: a tenant without a status hub still runs
 (tmp / "p1" / "notes.md").write_text("l1\nl2\nl3\n")
 (la.CONTEXT_DIR / "proj.md").write_text(f"add-dir: {tmp}/p1\nbrief: {{project}}/../p1/notes.md:2\nbrief: {tmp}/missing.md\nmap text\n")
 assert la.load_context(tmp / "proj") == ("map text", [str(tmp / "p1")], "--- notes.md ---\nl1\nl2"), la.load_context(tmp / "proj")
 la.DIGESTS_DIR = tmp / "digests"; la.DIGESTS_DIR.mkdir(); (la.DIGESTS_DIR / "chat.md").write_text("new ask\n" * 130)
 assert la.load_context(tmp / "proj")[2].endswith("--- chat.md ---\n" + "new ask\n" * 119 + "new ask")  # newest 120 lines
 (la.DIGESTS_DIR / "chat.md").unlink()
-seen, files = {}, la.brief_files(tmp / "proj")
+# the status hub: this project's file whole and first, every other project's summary block, no context map line needed
+la.STATUS_DIR.mkdir(); (la.STATUS_DIR / "proj.md").write_text("Status: search built\n" + "detail\n" * 20)
+(la.STATUS_DIR / "other.md").write_text("Status: export blocked\n" + "more\n" * 20)
+b = la.load_context(tmp / "proj")[2]
+assert b.startswith("--- status: proj ---\nStatus: search built\n" + "detail\n" * 20 + "\n--- status: other ---\nStatus: export blocked\n" + "more\n" * 6 + "more\n\n--- notes.md ---"), b
+assert la.status_files(tmp / "proj") == [(la.STATUS_DIR / "proj.md", None), (la.STATUS_DIR / "other.md", la.STATUS_HEAD)]
+assert la.brief_files(tmp / "proj")[2:] == la.status_files(tmp / "proj")  # re-read during the call like any brief file
+(la.STATUS_DIR / "proj.md").unlink(); (la.STATUS_DIR / "other.md").unlink()
+seen, files = {}, la.brief_files(tmp / "proj")[:2]
 assert [(p.resolve(), n) for p, n in files] == [((tmp / "p1" / "notes.md").resolve(), 2), ((tmp / "missing.md").resolve(), None)], files
 assert la.brief_news(seen, files) == ""  # the first look only records what the call started with
 (tmp / "p1" / "notes.md").write_text("l1\nl1b\nl2\n")

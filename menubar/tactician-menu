@@ -44,5 +44,6 @@ case "$1" in
     [ -n "$latest" ] && [ -z "$(git status --porcelain --untracked-files=no)" ] || exit 0
     git merge-base --is-ancestor HEAD "$latest" || exit 0   # HEAD is the release already, or holds work not in it
     if git symbolic-ref -q HEAD > /dev/null; then git merge -q --ff-only "$latest"   # on a branch: move it forward
-    else git checkout -q --detach "$latest"; fi ;;
+    else git checkout -q --detach "$latest"; fi
+    for s in "$C"/skills/*/; do ln -sfn "${s%/}" "$HOME/.claude/skills/$(basename "$s")"; done ;;  # a release can add a skill
 esac

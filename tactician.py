@@ -119,6 +119,8 @@ TOOLS = ["Read", "Grep", "Glob", "Skill", "Bash", "WebSearch", "WebFetch"]
 CONTEXT_DIR = HOME / "contexts"
 MEETINGS_DIR = HOME / "meetings"  # archived wrap-ups, one file per live meeting
 DIGESTS_DIR = HOME / "digests"  # the channel readers' rolling digests, one per channel (skills/tactician-read), newest first
+STATUS_DIR = HOME / "status"  # where each project stands, one file per project (skills/tactician-status), summary on top
+STATUS_HEAD = 8  # lines of another project's status file in the brief: its summary block
 
 
 CONTEXT_NAME = None  # --context: contexts/<name>.md alone, instead of the project folder's own context maps
@@ -138,9 +140,17 @@ def _brief_spec(line, project):
     return Path(os.path.expanduser(path)), int(limit) if limit else None
 
 
+def status_files(project):
+    """The status hub's files with their line limits: this project's whole, every other project's summary block, so a
+    question about any project has an answer. No context map line is needed for them."""
+    own = STATUS_DIR / f"{project.name}.md"
+    return [(own, None)] + [(p, STATUS_HEAD) for p in sorted(STATUS_DIR.glob("*.md")) if p != own]
+
+
 def brief_files(project):
-    """The context map's brief: files with their line limits, including ones that do not exist yet."""
-    return [_brief_spec(l, project) for l in _context_lines(project) if l.startswith("brief:")]
+    """The files re-read during the call, with their line limits, including ones that do not exist yet: the context
+    map's brief: files and the status hub."""
+    return [_brief_spec(l, project) for l in _context_lines(project) if l.startswith("brief:")] + status_files(project)
 
 
 def brief_news(seen, files):
@@ -176,6 +186,9 @@ def load_context(project):
     """contexts/<parent-dir>.md or contexts/<project>.md: add-dir: lines grant read access, brief: lines name files
     (path[:max-lines], {project} allowed) sent as the pre-meeting brief, every other line is prompt text."""
     text, dirs, brief = "", [], ""
+    for p, limit in status_files(project):  # first: where the projects stand is what the room asks about
+        if p.is_file():
+            brief += f"\n--- status: {p.stem} ---\n" + "\n".join(p.read_text().splitlines()[:limit]) + "\n"
     for line in _context_lines(project):
         if line.startswith("add-dir:"):
             pattern = os.path.expanduser(line.split(":", 1)[1].strip())
@@ -1442,6 +1455,7 @@ def main():
     ap.add_argument("--chat-replay", metavar="FILE", help='replay: chat lines "[HH:MM:SS] Name: text", fed as the transcript reaches them')
     ap.add_argument("--chat-probe", action="store_true", help="print what the Zoom chat reader sees now, no Claude")
     ap.add_argument("--context", help="use contexts/<NAME>.md alone instead of the project folder's context maps")
+    ap.add_argument("--show-brief", action="store_true", help="print what a call in this project would know (digest, status, brief files), no Claude")
     ap.add_argument("--preset", metavar="NAME", help="a start from the config's [presets.NAME]: project, context, participants, zoom_chat")
     a = ap.parse_args()
     if a.chat_probe:
@@ -1477,6 +1491,13 @@ def main():
     if not a.project:
         sys.exit(f"name a project, or set default_project in {HOME / 'config.toml'}")
     project = resolve_project(a.project)
+    if a.show_brief:
+        context, add_dirs, brief = load_context(project)
+        print(f"# {project}\n\n## Context map\n{context or '(none)'}\n\n## Readable folders\n" + "\n".join([str(project), *add_dirs])
+              + f"\n\n## Digest (CLAUDE.md)\n{claude_md(add_dirs) or '(none)'}\n\n## Brief\n{brief or '(none)'}")
+        if not (STATUS_DIR / f"{project.name}.md").is_file():
+            print(c("33", f"\nno status file for {project.name} ({STATUS_DIR / (project.name + '.md')}): run /tactician-status in Claude Code"))
+        return 0
     LOG_DIR.mkdir(exist_ok=True)
     pinned = None
     if a.replay:
@@ -1507,6 +1528,8 @@ def main():
     chat = ChatFeed() if a.zoom_chat and not a.replay else None
     chat_rows = parse_transcript(Path(a.chat_replay).read_text()) if a.chat_replay else []
     signal.signal(signal.SIGTERM, lambda *_: session.stop())  # Stop in the menu: as End on the board, with the wrap-up
+    if not a.replay and not (STATUS_DIR / f"{project.name}.md").is_file():
+        session.out(c("33", f"{now()} no status file for {project.name}: status questions go unanswered until /tactician-status has run (see tactician {project.name} --show-brief)"))
     url = serve_board(session, a.port)
     session.out(c("2", f"{now()} board: {url or 'no free port'}"))
     if url and sys.stdin.isatty():  # the configured Chrome profile, as an app window on the side monitor

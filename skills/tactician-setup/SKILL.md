@@ -1,12 +1,14 @@
 ---
 name: tactician-setup
-description: Install and set up Tactician on a new Mac, or extend or repair this Mac's setup - makes every prerequisite true (SwiftBar, both recording shortcuts, permissions), interviews the user into the tenant folder (who they are, engagements, key people, managers, project folders), writes the access map of every work channel, and proves the whole thing works. Use right after cloning the repo, when the user says "install tactician", "set up tactician", "onboard this Mac", "check my setup", "add an engagement", "add a channel", "update the access map", or when Tactician runs with an empty tenant.
+description: Install and set up Tactician on a new Mac, or extend or repair this Mac's setup - makes every prerequisite true (SwiftBar, both recording shortcuts, permissions), interviews the user into the tenant folder (who they are, engagements, key people, managers, project folders), builds the status hub (where every project stands, so a call can answer for any of them), puts every project in the menu, writes the access map of every work channel, and proves the whole thing works. Use right after cloning the repo, when the user says "install tactician", "set up tactician", "onboard this Mac", "check my setup", "add an engagement", "add a project", "add a channel", "update the access map", or when Tactician runs with an empty tenant.
 ---
 
 # Tactician setup
 
-Goal: one session takes this Mac from a fresh clone to a tenant Tactician can use on the next call, proven by tests,
-and an access map that the channel readers and the work agent can rely on. The user is a consultant; this Mac works for
+Goal: one session takes this Mac from a fresh clone to a tenant Tactician can use on the next call, proven by tests:
+it knows where every project stands (the status hub), every project can be started from the menu, and the access map
+is one the channel readers and the work agent can rely on. A Tactician that starts but cannot answer "where are we on
+X" is not set up. The user is a consultant; this Mac works for
 one company.
 
 Code: the tactician checkout this skill is loaded from (`README.md`, "Tenant folder", and `config.example.toml` define
@@ -44,13 +46,17 @@ A company-managed Mac may block an install: then say what is blocked and carry o
 - The menu lists the right folders: after the tenant is written, run the plugin
   (`<checkout>/menubar/tactician.5s.sh`) and confirm its output names every project folder the user takes calls in,
   including the folders an existing assistant system keeps (they become `project_roots`).
+- Every project has a status file and its call knows it: "The status hub" below.
 
 ## Discover before asking
 
 Find everything the Mac can tell you, then ask only for the rest. Useful signals:
 - Who: `git config user.name`, the macOS full name, the tenant's current `config.toml`.
-- Project folders: folders under `~` holding several git repos or a CLAUDE.md, and the folders the user's Claude Code
-  sessions run in (`~/.claude/projects` directory names are the paths with `/` turned into `-`).
+- Projects: every folder the user works in, wherever it lives. Folders under `~` holding several git repos or a
+  CLAUDE.md, single repos outside them (`find ~ -maxdepth 4 -name .git` minus dependencies and caches), and the
+  folders the user's Claude Code sessions run in (`~/.claude/projects` directory names are the paths with `/` turned
+  into `-`), each with when it was last touched. Show the list and let the user strike the ones that are not theirs
+  to take calls about; a project left off the list is a project Tactician cannot start in or speak about.
 - Existing engagement digests: a CLAUDE.md at a project root, skills under `~/.claude/skills` that hold company facts.
 - Channels: chat and mail apps in `/Applications` (Slack, Microsoft Teams, Outlook, Mail), Chrome profiles
   (`~/Library/Application Support/Google/Chrome/Local State`, `profile.info_cache`: profile directory, name, account),
@@ -68,7 +74,8 @@ Tactician joins what already works on this Mac; it never replaces it. When disco
 - Inventory each part: what it reads, what it writes and where, its schedule, and whether it works (its logs show
   recent good runs; the user says what they rely on).
 - Map each part to Tactician: its knowledge store becomes the engagement digest (an `add-dir:` or `brief:` line, the
-  files stay where they are); its chat or mail reader becomes that channel's reader (record it in `access.md` as the
+  files stay where they are) and the source the status hub copies each project's state from (never a second version
+  of it); its chat or mail reader becomes that channel's reader (record it in `access.md` as the
   `read` method; never add a second reader of the same channel); its write rules become that channel's `allowed`.
 - Never move, delete, disable or rewrite its files, jobs or data. A change to it needs the user's yes, one at a time.
 - Write the map in `NOTES.md` under "Existing system": each part, its Tactician role, and what stays its own.
@@ -104,6 +111,23 @@ the user's edits silently.
 - `denylist`: one term per line, the company, client and people names and any code names, so the pre-push guard stops
   them reaching the repo.
 
+### The status hub (`status/`)
+
+Tactician answers "where are we on X" from `status/<project>.md`: it loads the called project's file whole and the
+top of every other project's into each call, with no context map line needed. Without these files a call knows only
+the folder it was started in and has nothing to say about the user's other work. So setup is not done until:
+- Every project from discovery that the user kept has a status file, written by the `tactician-status` skill's rules
+  (read `skills/tactician-status/SKILL.md` in the checkout and do its pass for all projects now): evidence first, then
+  the user for what evidence cannot tell (what was promised to whom, what is blocked on a person, dates that bind).
+  When an existing system already holds this, the files are a dated copy of what it says.
+- Every one of those projects starts from the menu under its own name. The menu's Start Call In lists each
+  `project_roots` folder and the folders directly inside it: a parent folder that holds mostly projects becomes a
+  root; a project that lives elsewhere gets a `[presets.<name>]` with its `project` path and a `label`. Never move the
+  user's folders to make them fit. The most used one is `default_project`.
+- The user knows how it stays true: `/loop 30m /tactician-status` in a visible Claude Code session during working
+  hours, or one run before a call; after a call the review skill folds the wrap-up in. Offer to start the loop now,
+  and write the choice in `NOTES.md`.
+
 ### The access map (`access.md`)
 
 One section per channel, a channel being one workspace or account (two Slack workspaces are two channels):
@@ -126,6 +150,11 @@ user's explicit yes per channel.
 ## Verify
 
 - `python3 <checkout>/test_tactician.py` passes, and `tactician --shell-config` prints this tenant.
+- The status hub answers: for each project, `tactician <project> --show-brief` shows its status and the summary of
+  the others. Then put three plain questions to that output as the room would (where one project stands, what blocks
+  another, what is due next and when) and confirm each has its answer in it; fix the status file when one does not.
+- The menu starts every project: the plugin's output (`<checkout>/menubar/tactician.5s.sh`) has a Start line for each
+  project that has a status file, and no status file is left without one.
 - Each channel marked readable: read the newest few messages once by the stated method, without opening unread
   conversations where avoidable, and record the result in its `verified` line. A method that fails stays "not yet".
   Measure read state: the unread count before and after. In a background tab, `get_page_text` and `innerText` can come

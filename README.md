@@ -31,8 +31,9 @@ is missing (Python 3.11+, Muesli, SwiftBar and its plugin folder, both recording
 SwiftBar, the menu bar icon clear of the notch), runs `install.sh` for the plumbing (it links the `tactician` command,
 the skills and the SwiftBar plugin, turns on the pre-push guard, writes the shortcut files and creates the tenant folder
 with a starter config; it never overwrites a tenant's files), finds and reconciles an assistant system already on the
-Mac, interviews you into the tenant folder (config, context map, the access map of your work channels, denylist), and
-ends with tests and a short replay. You do the clicks only a person can (Add Shortcut, a System Settings switch). Run it
+Mac, interviews you into the tenant folder (config, context map, the access map of your work channels, denylist), builds
+the status hub (a status file for every project you take calls about, from the evidence on the Mac and your own
+word) and puts every project in the menu, and ends with tests and a short replay. You do the clicks only a person can (Add Shortcut, a System Settings switch). Run it
 again any time to check or repair a Mac. Each Mac moves itself to the
 newest release tag every 6 hours (and from the menu's Check for Updates), never during a call and never over local
 changes. To change Tactician from any Mac: the menu's Improve Tactician... opens a Claude session in the checkout, which
@@ -53,6 +54,7 @@ on machines for different companies and no company's data reaches another or the
 | `docs/` | graded call write-ups |
 | `access.md` | the access map: each work channel (chat workspace, mail account), how it is read on this Mac, what the company allows (read, react, draft), when it was verified |
 | `NOTES.md` | this company's post-call steps and constraints, read by the review skill |
+| `status/<project>.md` | the status hub: where each project stands, what is next, what is blocked and who is waiting, summary on top; written by setup and kept true by `/tactician-status` (before a call, or `/loop 30m /tactician-status`) |
 | `digests/<channel>.md`, `inbox.jsonl` | what the channel reader (`/loop 20m /tactician-read` in a visible session) found: a rolling digest per channel, loaded into every brief, and the direct asks of you |
 
 With an empty tenant folder Tactician still runs: a generic prompt, no brief, projects given as paths.
@@ -124,6 +126,9 @@ held, nudge and check-with behaviour.
 - The project folder you name, plus the context map's `add-dir:` folders, read-only (Read, Grep, Glob, a graphify
   knowledge graph when `graphify-out/graph.json` exists, web search). A deny list overrides every allow rule.
 - The CLAUDE.md of each readable folder (the engagement digest), put into the prompt itself.
+- The status hub: `status/<project>.md` of the project the call is in, whole, and the summary block on top of every
+  other project's file, so a question about any project has an answer. Without it a call knows only the folder it
+  was started in. `tactician <project> --show-brief` prints what a call there would know, without starting one.
 - The pre-meeting brief: the newest wrap-up of a call in the same project root, the context map's `brief:` files, and
   what you and your Claude Code sessions in those folders said in the last 12 hours (their transcripts in
   `~/.claude/projects`, tool traffic left out).
